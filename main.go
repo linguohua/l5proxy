@@ -9,7 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"linproxy/server"
+	"lproxy-go/server"
 )
 
 var (

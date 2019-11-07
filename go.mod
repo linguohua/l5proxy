@@ -1,4 +1,4 @@
-module linproxy
+module lproxy-go
 
 go 1.13
 
