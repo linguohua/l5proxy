@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -10,9 +11,10 @@ import (
 )
 
 var (
-	upgrader   = websocket.Upgrader{} // use default options
-	wsIndex    = 0
-	accountMap = make(map[string]*Account)
+	upgrader      = websocket.Upgrader{} // use default options
+	wsIndex       = 0
+	accountMap    = make(map[string]*Account)
+	dnsServerAddr *net.UDPAddr
 )
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +64,12 @@ func setupBuiltinAccount() {
 // CreateHTTPServer start http server
 func CreateHTTPServer(listenAddr string, wsPath string) {
 	setupBuiltinAccount()
+
+	var err error
+	dnsServerAddr, err = net.ResolveUDPAddr("udp", "8.8.8.8:53")
+	if err != nil {
+		log.Fatal("resolve dns server address failed:", err)
+	}
 
 	go keepalive()
 	http.HandleFunc(wsPath, wsHandler)

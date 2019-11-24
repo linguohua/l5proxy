@@ -19,6 +19,8 @@ const (
 	cMDReqClientFinished = 4
 	cMDReqServerFinished = 5
 	cMDReqServerClosed   = 6
+	cMDDNSReq            = 7
+	cMDDNSRsp            = 8
 )
 
 // Tunnel tunnel
@@ -117,6 +119,12 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 	}
 
 	cmd := message[0]
+	if cmd == cMDDNSReq {
+		// TODO: too many goroutines
+		go doDNSQuery(t, message)
+		return nil
+	}
+
 	idx := binary.LittleEndian.Uint16(message[1:])
 	tag := binary.LittleEndian.Uint16(message[3:])
 
@@ -129,6 +137,7 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 		t.handleRequestFinished(idx, tag)
 	case cMDReqClientClosed:
 		t.handleRequestClosed(idx, tag)
+
 	default:
 		log.Printf("onTunnelMessage, unsupport tunnel cmd:%d", cmd)
 	}
