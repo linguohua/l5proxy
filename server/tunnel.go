@@ -138,14 +138,32 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 
 func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
 	addressType := message[0]
-	if addressType != 1 {
+	var port uint16
+	var domain string
+	switch addressType {
+	case 0: // ipv4
+		domain = fmt.Sprintf("%d.%d.%d.%d", message[4], message[3], message[2], message[1])
+		port = binary.LittleEndian.Uint16(message[5:])
+	case 1: // domain name
+		domainLen := message[1]
+		domain = string(message[2 : 2+domainLen])
+		port = binary.LittleEndian.Uint16(message[(2 + domainLen):])
+	case 2: // ipv6
+		p1 := binary.LittleEndian.Uint16(message[1:])
+		p2 := binary.LittleEndian.Uint16(message[3:])
+		p3 := binary.LittleEndian.Uint16(message[5:])
+		p4 := binary.LittleEndian.Uint16(message[7:])
+		p5 := binary.LittleEndian.Uint16(message[9:])
+		p6 := binary.LittleEndian.Uint16(message[11:])
+		p7 := binary.LittleEndian.Uint16(message[13:])
+		p8 := binary.LittleEndian.Uint16(message[15:])
+
+		domain = fmt.Sprintf("%d:%d:%d:%d:%d:%d:%d:%d", p8, p7, p6, p5, p4, p3, p2, p1)
+		port = binary.LittleEndian.Uint16(message[17:])
+	default:
 		log.Println("handleRequestCreate, not support addressType:", addressType)
 		return
 	}
-
-	domainLen := message[1]
-	domain := string(message[2 : 2+domainLen])
-	port := binary.LittleEndian.Uint16(message[(2 + domainLen):])
 
 	req, err := t.reqq.alloc(idx, tag)
 	if err != nil {
