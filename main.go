@@ -48,17 +48,17 @@ func main() {
 	}
 
 	if listenAddr == defaultListenAddr {
-		eListenAddr := os.Getenv("LPROXY-GO-LADDR")
+		eListenAddr := os.Getenv("LPROXY_GO_LADDR")
 		if len(eListenAddr) > 0 {
-			log.Println("use env LPROXY-GO-LADDR instead of commandline:", eListenAddr)
+			log.Println("use env LPROXY_GO_LADDR instead of commandline:", eListenAddr)
 			listenAddr = eListenAddr
 		}
 	}
 
 	if wsPath == defaultPath {
-		ePath := os.Getenv("LPROXY-GO-PATH")
+		ePath := os.Getenv("LPROXY_GO_PATH")
 		if len(ePath) > 0 {
-			log.Println("use env LPROXY-GO-PATH instead of commandline:", ePath)
+			log.Println("use env LPROXY_GO_PATH instead of commandline:", ePath)
 			wsPath = ePath
 		}
 	}
