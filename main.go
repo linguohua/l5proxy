@@ -14,16 +14,19 @@ import (
 
 var (
 	listenAddr = ""
+	listenPort = ""
 	wsPath     = ""
 	daemon     = ""
 )
 
 const (
-	defaultListenAddr = "127.0.0.1:8020"
+	defaultListenAddr = "127.0.0.1"
 	defaultPath       = "/tun"
+	defaultListenPort = "8020"
 )
 
 func init() {
+	flag.StringVar(&listenPort, "lp", defaultListenPort, "specify the listen port")
 	flag.StringVar(&listenAddr, "l", defaultListenAddr, "specify the listen address")
 	flag.StringVar(&wsPath, "p", defaultPath, "specify websocket path")
 	flag.StringVar(&daemon, "d", "yes", "specify daemon mode")
@@ -47,6 +50,14 @@ func main() {
 		os.Exit(0)
 	}
 
+	if listenPort == defaultListenPort {
+		eListenPort := os.Getenv("PORT")
+		if len(eListenPort) > 0 {
+			log.Println("use env PORT instead of commandline:", eListenPort)
+			listenPort = eListenPort
+		}
+	}
+
 	if listenAddr == defaultListenAddr {
 		eListenAddr := os.Getenv("LPROXY_GO_LADDR")
 		if len(eListenAddr) > 0 {
@@ -66,7 +77,7 @@ func main() {
 	log.Println("try to start  linproxy server, version:", getVersion())
 
 	// start http server
-	go server.CreateHTTPServer(listenAddr, wsPath)
+	go server.CreateHTTPServer(listenAddr+":"+listenPort, wsPath)
 	log.Println("start linproxy server ok!")
 
 	if daemon == "yes" {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"time"
 
@@ -40,6 +41,15 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	account.acceptWebsocket(c)
 }
 
+// indexHandler responds to requests with our greeting.
+func indexHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	fmt.Fprint(w, "Hello, Stupid!")
+}
+
 func keepalive() {
 	for {
 		time.Sleep(time.Second * 30)
@@ -72,6 +82,7 @@ func CreateHTTPServer(listenAddr string, wsPath string) {
 	}
 
 	go keepalive()
+	http.HandleFunc("/", indexHandler)
 	http.HandleFunc(wsPath, wsHandler)
 	log.Printf("server listen at:%s, path:%s", listenAddr, wsPath)
 	log.Fatal(http.ListenAndServe(listenAddr, nil))
