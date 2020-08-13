@@ -20,7 +20,7 @@ var (
 )
 
 const (
-	defaultListenAddr = "127.0.0.1"
+	defaultListenAddr = ""
 	defaultPath       = "/tun"
 	defaultListenPort = "8020"
 )
