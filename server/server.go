@@ -51,23 +51,32 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func keepalive() {
+	tick := 0
 	for {
-		time.Sleep(time.Second * 30)
+		time.Sleep(time.Second * 1)
+		tick++
 
 		for _, a := range accountMap {
-			a.keepalive()
+			a.rateLimitReset()
+		}
+
+		if tick == 30 {
+			tick = 0
+			for _, a := range accountMap {
+				a.keepalive()
+			}
 		}
 	}
 }
 
 func setupBuiltinAccount() {
 
-	uuids := []string{
-		"ee80e87b-fc41-4e59-a722-7c3fee039cb4",
-		"f6000866-1b89-4ab4-b1ce-6b7625b8259a"}
+	uuids := []*AccountConfig{
+		{uuid: "ee80e87b-fc41-4e59-a722-7c3fee039cb4", rateLimit: 200 * 1024, maxTunnelCount: 3},
+		{uuid: "f6000866-1b89-4ab4-b1ce-6b7625b8259a", rateLimit: 0, maxTunnelCount: 3}}
 
 	for _, u := range uuids {
-		accountMap[u] = newAccount(u)
+		accountMap[u.uuid] = newAccount(u)
 	}
 }
 
