@@ -1,0 +1,14 @@
+{
+    "accounts": [{
+            "uuid": "ee80e87b-fc41-4e59-a722-7c3fee039cb4",
+            "rateLimit": 204800,
+            "maxTunnel": 3
+
+        },
+        {
+            "uuid": "f6000866-1b89-4ab4-b1ce-6b7625b8259a",
+            "rateLimit": 0,
+            "maxTunnel": 3
+        }
+    ]
+}

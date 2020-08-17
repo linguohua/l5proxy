@@ -7,9 +7,9 @@ import (
 
 // AccountConfig config
 type AccountConfig struct {
-	uuid           string
-	rateLimit      uint // 0: no limit
-	maxTunnelCount uint
+	UUID      string `json:"UUID"`
+	RateLimit uint   `json:"rateLimit"` // 0: no limit
+	MaxTunnel uint   `json:"maxTunnel"`
 }
 
 // Account account
@@ -18,23 +18,23 @@ type Account struct {
 	tunnels map[int]*Tunnel
 	tidx    int
 
-	rateLimit      uint // 0: no limit
-	maxTunnelCount uint
+	rateLimit uint // 0: no limit
+	maxTunnel uint
 }
 
 func newAccount(uc *AccountConfig) *Account {
 	return &Account{
-		uuid:           uc.uuid,
-		rateLimit:      uc.rateLimit,
-		maxTunnelCount: uc.maxTunnelCount,
-		tunnels:        make(map[int]*Tunnel),
+		uuid:      uc.UUID,
+		rateLimit: uc.RateLimit,
+		maxTunnel: uc.MaxTunnel,
+		tunnels:   make(map[int]*Tunnel),
 	}
 }
 
 func (a *Account) acceptWebsocket(conn *websocket.Conn) {
 	log.Printf("account:%s accept websocket, total:%d", a.uuid, 1+len(a.tunnels))
 
-	if a.maxTunnelCount > 0 && uint(len(a.tunnels)) >= a.maxTunnelCount {
+	if a.maxTunnel > 0 && uint(len(a.tunnels)) >= a.maxTunnel {
 		conn.Close()
 		return
 	}

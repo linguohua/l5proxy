@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"time"
 
@@ -69,20 +71,35 @@ func keepalive() {
 	}
 }
 
-func setupBuiltinAccount() {
-
-	uuids := []*AccountConfig{
-		{uuid: "ee80e87b-fc41-4e59-a722-7c3fee039cb4", rateLimit: 200 * 1024, maxTunnelCount: 3},
-		{uuid: "f6000866-1b89-4ab4-b1ce-6b7625b8259a", rateLimit: 0, maxTunnelCount: 3}}
-
-	for _, u := range uuids {
-		accountMap[u.uuid] = newAccount(u)
+func setupBuiltinAccount(accountFilePath string) {
+	fileBytes, err := ioutil.ReadFile(accountFilePath)
+	if err != nil {
+		log.Panicln("read account cfg file failed:", err)
 	}
+
+	// uuids := []*AccountConfig{
+	// 	{uuid: "ee80e87b-fc41-4e59-a722-7c3fee039cb4", rateLimit: 200 * 1024, maxTunnelCount: 3},
+	// 	{uuid: "f6000866-1b89-4ab4-b1ce-6b7625b8259a", rateLimit: 0, maxTunnelCount: 3}}
+	type jsonstruct struct {
+		Accounts []*AccountConfig `json:"accounts"`
+	}
+
+	var accountCfgs = &jsonstruct{}
+	err = json.Unmarshal(fileBytes, accountCfgs)
+	if err != nil {
+		log.Panicln("parse account cfg file failed:", err)
+	}
+
+	for _, a := range accountCfgs.Accounts {
+		accountMap[a.UUID] = newAccount(a)
+	}
+
+	log.Println("load account ok, number of account:", len(accountCfgs.Accounts))
 }
 
 // CreateHTTPServer start http server
-func CreateHTTPServer(listenAddr string, wsPath string) {
-	setupBuiltinAccount()
+func CreateHTTPServer(listenAddr string, wsPath string, accountFilePath string) {
+	setupBuiltinAccount(accountFilePath)
 
 	var err error
 	dnsServerAddr, err = net.ResolveUDPAddr("udp", "8.8.8.8:53")

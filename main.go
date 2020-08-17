@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	listenAddr = ""
-	listenPort = ""
-	wsPath     = ""
-	daemon     = ""
+	listenAddr      = ""
+	listenPort      = ""
+	wsPath          = ""
+	daemon          = ""
+	accountFilePath = ""
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 func init() {
 	flag.StringVar(&listenPort, "lp", defaultListenPort, "specify the listen port")
 	flag.StringVar(&listenAddr, "l", defaultListenAddr, "specify the listen address")
+	flag.StringVar(&accountFilePath, "c", "", "specify the listen address")
 	flag.StringVar(&wsPath, "p", defaultPath, "specify websocket path")
 	flag.StringVar(&daemon, "d", "yes", "specify daemon mode")
 }
@@ -74,10 +76,20 @@ func main() {
 		}
 	}
 
+	if accountFilePath == "" {
+		ePath := os.Getenv("LPROXY_GO_ACCF_PATH")
+		if len(ePath) > 0 {
+			log.Println("use env LPROXY_GO_ACCF_PATH instead of commandline:", ePath)
+			accountFilePath = ePath
+		} else {
+			log.Panic("please use -c to specify account file path of LPROXY_GO_ACCF_PATH env")
+		}
+	}
+
 	log.Println("try to start  linproxy server, version:", getVersion())
 
 	// start http server
-	go server.CreateHTTPServer(listenAddr+":"+listenPort, wsPath)
+	go server.CreateHTTPServer(listenAddr+":"+listenPort, wsPath, accountFilePath)
 	log.Println("start linproxy server ok!")
 
 	if daemon == "yes" {
