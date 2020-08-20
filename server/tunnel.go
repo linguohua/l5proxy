@@ -99,6 +99,8 @@ func (t *Tunnel) serverRateChan() {
 			t.write(buf)
 
 			t.waitQuota(uint(leN))
+		} else {
+			break
 		}
 	}
 }
