@@ -32,19 +32,19 @@ type Tunnel struct {
 	writeLock sync.Mutex
 	waitping  int
 
-	rateLimit   uint
-	rateCounter uint
-	rateChan    chan []byte
-	rateWg      *sync.WaitGroup
+	rateLimit uint
+	rateQuota uint
+	rateChan  chan []byte
+	rateWg    *sync.WaitGroup
 }
 
 func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint) *Tunnel {
 
 	t := &Tunnel{
-		id:          id,
-		conn:        conn,
-		rateLimit:   rateLimit,
-		rateCounter: rateLimit,
+		id:        id,
+		conn:      conn,
+		rateLimit: rateLimit,
+		rateQuota: rateLimit,
 	}
 
 	reqq := newReqq(cap, t)
@@ -69,7 +69,7 @@ func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint) *Tunnel {
 }
 
 func (t *Tunnel) rateLimitReset(quota uint) {
-	t.rateCounter = quota
+	t.rateQuota = quota
 
 	if t.rateWg != nil {
 		t.rateWg.Done()
@@ -78,8 +78,8 @@ func (t *Tunnel) rateLimitReset(quota uint) {
 }
 
 func (t *Tunnel) waitQuota(q uint) {
-	if t.rateCounter < q {
-		t.rateCounter = 0
+	if t.rateQuota < q {
+		t.rateQuota = 0
 
 		// wait
 		wg := sync.WaitGroup{}
@@ -87,11 +87,11 @@ func (t *Tunnel) waitQuota(q uint) {
 		t.rateWg = &wg
 		wg.Wait()
 	} else {
-		t.rateCounter = t.rateCounter - q
+		t.rateQuota = t.rateQuota - q
 	}
 }
 
-func (t *Tunnel) serverRateChan() {
+func (t *Tunnel) drainRateChan() {
 	for {
 		buf := <-t.rateChan
 		if buf != nil {
@@ -108,7 +108,7 @@ func (t *Tunnel) serverRateChan() {
 func (t *Tunnel) serve() {
 	// loop read websocket message
 	if t.rateLimit > 0 {
-		go t.serverRateChan()
+		go t.drainRateChan()
 	}
 
 	c := t.conn
