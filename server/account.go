@@ -7,16 +7,18 @@ import (
 
 // AccountConfig config
 type AccountConfig struct {
-	UUID      string `json:"UUID"`
-	RateLimit uint   `json:"rateLimit"` // 0: no limit
-	MaxTunnel uint   `json:"maxTunnel"`
+	UUID          string `json:"UUID"`
+	RateLimit     uint   `json:"rateLimit"` // 0: no limit
+	MaxTunnel     uint   `json:"maxTunnel"`
+	UseWhitelistA bool   `json:"useWhitelistA"`
 }
 
 // Account account
 type Account struct {
-	uuid    string
-	tunnels map[int]*Tunnel
-	tidx    int
+	uuid          string
+	useWhitelistA bool
+	tunnels       map[int]*Tunnel
+	tidx          int
 
 	rateLimit uint // 0: no limit
 	maxTunnel uint
@@ -24,10 +26,11 @@ type Account struct {
 
 func newAccount(uc *AccountConfig) *Account {
 	return &Account{
-		uuid:      uc.UUID,
-		rateLimit: uc.RateLimit,
-		maxTunnel: uc.MaxTunnel,
-		tunnels:   make(map[int]*Tunnel),
+		uuid:          uc.UUID,
+		rateLimit:     uc.RateLimit,
+		maxTunnel:     uc.MaxTunnel,
+		useWhitelistA: uc.UseWhitelistA,
+		tunnels:       make(map[int]*Tunnel),
 	}
 }
 

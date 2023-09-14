@@ -40,9 +40,9 @@ func (r *Request) onClientData(data []byte) {
 		err := writeAll(data, r.conn)
 		if err != nil {
 			log.Println("onClientData, write failed:", err)
-		} else {
-			// log.Println("onClientData, write:", len(data))
-		}
+		} //else {
+		// log.Println("onClientData, write:", len(data))
+		//}
 	}
 }
 
