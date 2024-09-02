@@ -21,6 +21,7 @@ const (
 	cMDReqServerClosed   = 6
 	cMDDNSReq            = 7
 	cMDDNSRsp            = 8
+	cMDUDPReq            = 9
 )
 
 // Tunnel tunnel
@@ -36,6 +37,7 @@ type Tunnel struct {
 	rateQuota uint
 	rateChan  chan []byte
 	rateWg    *sync.WaitGroup
+	cache     *Cache
 }
 
 func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint) *Tunnel {
@@ -45,6 +47,7 @@ func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint) *Tunnel {
 		conn:      conn,
 		rateLimit: rateLimit,
 		rateQuota: rateLimit,
+		cache:     newCache(),
 	}
 
 	reqq := newReqq(cap, t)
@@ -183,6 +186,11 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 		return nil
 	}
 
+	if cmd == cMDUDPReq {
+		t.handleUDPReq(message)
+		return nil
+	}
+
 	idx := binary.LittleEndian.Uint16(message[1:])
 	tag := binary.LittleEndian.Uint16(message[3:])
 
@@ -209,7 +217,7 @@ func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
 	var domain string
 	switch addressType {
 	case 0: // ipv4
-		domain = fmt.Sprintf("%d.%d.%d.%d", message[4], message[3], message[2], message[1])
+		domain = fmt.Sprintf("%d.%d.%d.%d", message[1], message[2], message[3], message[4])
 		port = binary.LittleEndian.Uint16(message[5:])
 	case 1: // domain name
 		domainLen := message[1]
@@ -316,4 +324,80 @@ func (t *Tunnel) onRequestData(req *Request, data []byte) {
 	} else {
 		t.write(buf)
 	}
+}
+
+func (t *Tunnel) handleUDPReq(data []byte) {
+	// skip cmd
+	src := parseAddress(data[1:])
+	dest := parseAddress(data[1+3+len(src.IP):])
+
+	log.Infof("handleUDPReq src %s dest %s", src.String(), dest.String())
+
+	ustub := t.cache.get(src)
+	if ustub == nil {
+		ustub = newUstub(t, src)
+		t.cache.add(ustub)
+		log.Infof("new ustub src %s", src.String())
+	}
+
+	skip := 7 + len(src.IP) + len(dest.IP)
+	ustub.writeTo(dest, data[skip:])
+}
+
+func (t *Tunnel) onServerData(data []byte, src *net.UDPAddr, dest *net.UDPAddr) {
+	log.Infof("onServerData src %s dest %s", src, dest)
+
+	srcAddrBuf := writeAddress(src)
+	destAddrBuf := writeAddress(dest)
+
+	buf := make([]byte, 1+len(srcAddrBuf)+len(destAddrBuf)+len(data))
+
+	buf[0] = byte(cMDUDPReq)
+	copy(buf[1:], srcAddrBuf)
+	copy(buf[1+len(srcAddrBuf):], destAddrBuf)
+	copy(buf[1+len(srcAddrBuf)+len(destAddrBuf):], data)
+
+	t.write(buf)
+}
+
+func parseAddress(msg []byte) *net.UDPAddr {
+	// skip cmd
+	var ip = make([]byte, 0)
+
+	offset := 0
+	port := binary.LittleEndian.Uint16(msg[offset:])
+	offset += 2
+
+	ipType := msg[offset]
+	offset += 1
+
+	switch ipType {
+	case 0:
+		// ipv4
+		ip = msg[offset : offset+4]
+		offset += 4
+	case 2:
+		// ipv6
+		ip = msg[offset : offset+16]
+	}
+
+	return &net.UDPAddr{IP: ip, Port: int(port)}
+}
+
+func writeAddress(addrss *net.UDPAddr) []byte {
+	// 3 = iptype(1) + port(2)
+	buf := make([]byte, 3+len(addrss.IP))
+	// add port
+	binary.LittleEndian.PutUint16(buf[0:], uint16(addrss.Port))
+	// set ip type
+	if len(addrss.IP) > net.IPv4len {
+		// ipv6
+		buf[2] = 2
+	} else {
+		// ipv4
+		buf[2] = 0
+	}
+
+	copy(buf[3:], addrss.IP)
+	return buf
 }

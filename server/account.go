@@ -56,6 +56,10 @@ func (a *Account) keepalive() {
 	for _, t := range a.tunnels {
 		t.keepalive()
 	}
+
+	for _, t := range a.tunnels {
+		t.cache.keepalive()
+	}
 }
 
 func (a *Account) rateLimitReset() {
