@@ -24,7 +24,7 @@ var (
 	whitelistA *Whitelist = nil
 	whitelistB *Whitelist = nil
 
-	udpServ *UDPServ = nil
+	reverseServer *ReverseServ = nil
 )
 
 type Whitelist struct {
@@ -60,7 +60,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	account.acceptWebsocket(c, udpServ, endpoint)
+	account.acceptWebsocket(c, reverseServer, endpoint)
 }
 
 // indexHandler responds to requests with our greeting.
@@ -196,18 +196,19 @@ func setupWhitelists(dir string) {
 	whitelistB = setupWhitelist(path2)
 }
 
-func setupAddressMap(addressMapFilePath string) map[string]AddressMap {
-	fileBytes, err := ioutil.ReadFile(addressMapFilePath)
+func setupAddressMap(addressMapFilePath string) (map[string]AddressMap, map[string]AddressMap) {
+	fileBytes, err := os.ReadFile(addressMapFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
 
-		log.Panicln("read addressmap cfg file failed:", err)
+		log.Panicf("read addressmap cfg file %s failed:%s", addressMapFilePath, err.Error())
 	}
 
 	type jsonstruct struct {
-		AddressMaps map[string]AddressMap `json:"udpmap"`
+		UDPAddressMaps map[string]AddressMap `json:"udpmap"`
+		TCPAddressMaps map[string]AddressMap `json:"tcpmap"`
 	}
 	var addressMap = jsonstruct{}
 	err = json.Unmarshal(fileBytes, &addressMap)
@@ -215,22 +216,19 @@ func setupAddressMap(addressMapFilePath string) map[string]AddressMap {
 		log.Panicln("parse addressmap cfg file failed:", err)
 	}
 
-	return addressMap.AddressMaps
+	return addressMap.TCPAddressMaps, addressMap.UDPAddressMaps
 }
 
-func setupUdpAddressMap(dir string) {
+func setupReverseServAddressMap(dir string) {
 	path := path.Join(dir, "addressmap.json")
-	addressMaps := setupAddressMap(path)
+	tcpAddressMaps, udpAddressMaps := setupAddressMap(path)
 
-	udpRevSers, err := newUDPServ(addressMaps)
+	reverseServ, err := NewReverseServ(tcpAddressMaps, udpAddressMaps)
 	if err != nil {
 		log.Panicln("new udp reverse server failed:", err)
 	}
 
-	udpServ = udpRevSers
-	// for _, account := range accountMap {
-	// 	account.setUDPReverseServ(udpRevSers)
-	// }
+	reverseServer = reverseServ
 
 }
 
@@ -238,7 +236,7 @@ func setupUdpAddressMap(dir string) {
 func CreateHTTPServer(listenAddr string, wsPath string, accountFilePath string) {
 	setupBuiltinAccount(accountFilePath)
 	setupWhitelists(path.Join(path.Dir(accountFilePath)))
-	setupUdpAddressMap(path.Join(path.Dir(accountFilePath)))
+	setupReverseServAddressMap(path.Join(path.Dir(accountFilePath)))
 
 	var err error
 	dnsServerAddr, err = net.ResolveUDPAddr("udp", "8.8.8.8:53")

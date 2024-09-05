@@ -15,21 +15,6 @@ type Ustub struct {
 	lastActvity time.Time
 }
 
-func newUDPConn(addr string) (*net.UDPConn, error) {
-	udpAddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("Error resolving UDP address: %s", err.Error())
-	}
-
-	conn, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		return nil, fmt.Errorf("Error creating UDP connection: %s", err.Error())
-	}
-
-	log.Infof("udp proxy on %s", conn.LocalAddr().String())
-	return conn, nil
-}
-
 func newUstub(tun *Tunnel, udpConn *net.UDPConn, srcAddr *net.UDPAddr) *Ustub {
 	ustub := &Ustub{tun: tun, conn: udpConn, srcAddr: srcAddr}
 	go ustub.proxy()

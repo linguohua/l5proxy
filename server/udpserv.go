@@ -3,8 +3,8 @@ package server
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"net"
-	"sync"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -15,12 +15,11 @@ type TunnelMap map[int]*Tunnel
 
 type UDPServ struct {
 	udpConns map[string]UDPConnMap
-	tunnels  map[string]TunnelMap
-	lock     sync.Mutex
+	reverse  *ReverseServ
 }
 
-func newUDPServ(addrssMaps map[string]AddressMap) (*UDPServ, error) {
-	s := &UDPServ{udpConns: make(map[string]UDPConnMap), tunnels: make(map[string]TunnelMap)}
+func newUDPServ(reverse *ReverseServ, addrssMaps map[string]AddressMap) (*UDPServ, error) {
+	s := &UDPServ{udpConns: make(map[string]UDPConnMap), reverse: reverse}
 
 	for endpoint, addrssmap := range addrssMaps {
 		for src, serv := range addrssmap {
@@ -50,6 +49,21 @@ func newUDPServ(addrssMaps map[string]AddressMap) (*UDPServ, error) {
 	return s, nil
 }
 
+func newUDPConn(addr string) (*net.UDPConn, error) {
+	udpAddr, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("Error resolving UDP address: %s", err.Error())
+	}
+
+	conn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return nil, fmt.Errorf("Error creating UDP connection: %s", err.Error())
+	}
+
+	log.Infof("udp proxy on %s", conn.LocalAddr().String())
+	return conn, nil
+}
+
 func (udpServ *UDPServ) getUDPConn(endpoint string, src *net.UDPAddr) *net.UDPConn {
 	udpConnMap := udpServ.udpConns[endpoint]
 	if udpConnMap == nil {
@@ -60,21 +74,8 @@ func (udpServ *UDPServ) getUDPConn(endpoint string, src *net.UDPAddr) *net.UDPCo
 	return udpConnMap[key]
 }
 
-func (udpServ *UDPServ) getTunnel(endpoint string) *Tunnel {
-	tunnelMap := udpServ.tunnels[endpoint]
-	if tunnelMap == nil {
-		return nil
-	}
-
-	for _, v := range tunnelMap {
-		return v
-	}
-
-	return nil
-}
-
 func (udpServ *UDPServ) onData(msg []byte, srcAddr *net.UDPAddr, destAddr *net.UDPAddr, endpoint string) {
-	tunnel := udpServ.getTunnel(endpoint)
+	tunnel := udpServ.reverse.getTunnel(endpoint)
 	if tunnel == nil {
 		log.Errorf("can not get tunnel for endpoint %s", endpoint)
 		return
@@ -103,40 +104,6 @@ func (udpServ *UDPServ) udpProxy(conn *net.UDPConn, srcAddr *net.UDPAddr, endpoi
 		udpServ.onData(buffer[:n], srcAddr, dest, endpoint)
 	}
 
-}
-
-func (udpServ *UDPServ) onTunnelConnect(tunnel *Tunnel) {
-	udpServ.lock.Lock()
-	defer udpServ.lock.Unlock()
-
-	endpoint := tunnel.endpoint
-
-	tunnelMap := udpServ.tunnels[endpoint]
-	if tunnelMap == nil {
-		tunnelMap = make(TunnelMap)
-	}
-
-	tunnelMap[tunnel.id] = tunnel
-	udpServ.tunnels[endpoint] = tunnelMap
-}
-func (udpServ *UDPServ) onTunnelClose(tunnel *Tunnel) {
-	udpServ.lock.Lock()
-	defer udpServ.lock.Unlock()
-
-	endpoint := tunnel.endpoint
-
-	tunnelMap := udpServ.tunnels[endpoint]
-	if tunnelMap == nil {
-		return
-	}
-
-	delete(tunnelMap, tunnel.id)
-
-	if len(tunnelMap) > 0 {
-		udpServ.tunnels[endpoint] = tunnelMap
-	} else {
-		delete(udpServ.tunnels, endpoint)
-	}
 }
 
 func key(src *net.UDPAddr) string {

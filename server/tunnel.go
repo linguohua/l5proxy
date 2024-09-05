@@ -33,26 +33,26 @@ type Tunnel struct {
 	writeLock sync.Mutex
 	waitping  int
 
-	rateLimit uint
-	rateQuota uint
-	rateChan  chan []byte
-	rateWg    *sync.WaitGroup
-	cache     *Cache
-	endpoint  string
-	udpServ   *UDPServ
+	rateLimit   uint
+	rateQuota   uint
+	rateChan    chan []byte
+	rateWg      *sync.WaitGroup
+	cache       *Cache
+	endpoint    string
+	reverseServ *ReverseServ
 	// reverseServ *UDPReverseServers
 }
 
-func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont string, udpserv *UDPServ) *Tunnel {
+func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont string, reverseServ *ReverseServ) *Tunnel {
 
 	t := &Tunnel{
-		id:        id,
-		conn:      conn,
-		rateLimit: rateLimit,
-		rateQuota: rateLimit,
-		cache:     newCache(),
-		endpoint:  endpiont,
-		udpServ:   udpserv,
+		id:          id,
+		conn:        conn,
+		rateLimit:   rateLimit,
+		rateQuota:   rateLimit,
+		cache:       newCache(),
+		endpoint:    endpiont,
+		reverseServ: reverseServ,
 	}
 
 	reqq := newReqq(cap, t)
@@ -73,7 +73,7 @@ func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont s
 		t.rateChan = make(chan []byte, 100)
 	}
 
-	udpserv.onTunnelConnect(t)
+	reverseServ.onTunnelConnect(t)
 	return t
 }
 
@@ -178,7 +178,7 @@ func (t *Tunnel) onClose() {
 	}
 
 	t.reqq.cleanup()
-	t.udpServ.onTunnelClose(t)
+	t.reverseServ.onTunnelClose(t)
 
 }
 
@@ -344,7 +344,7 @@ func (t *Tunnel) handleUDPReq(data []byte) {
 	// 7 = cmd + iptype1 + iptype2 + port1 + port2
 	skip := 7 + len(src.IP) + len(dest.IP)
 
-	conn := t.udpServ.getUDPConn(t.endpoint, src)
+	conn := t.reverseServ.getUDPConn(t.endpoint, src)
 	if conn != nil {
 		conn.WriteTo(data[skip:], dest)
 		return
@@ -421,4 +421,51 @@ func writeAddress(addrss *net.UDPAddr) []byte {
 
 	copy(buf[3:], addrss.IP)
 	return buf
+}
+
+func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
+	tcpConn := conn.(*net.TCPConn)
+	req, err := t.reqq.allocForConn(tcpConn)
+	if err != nil {
+		return err
+	}
+
+	t.onClientCreate(src, req.idx, req.tag)
+
+	// start a new goroutine to read data from 'conn'
+	go req.proxy()
+
+	return nil
+}
+
+func (t *Tunnel) onClientCreate(src *net.TCPAddr, idx, tag uint16) {
+	addr := src.IP
+	port := src.Port
+	log.Infof("local address %s local port %d", addr, port)
+
+	iplen := net.IPv6len
+	if src.IP.To4() != nil {
+		iplen = net.IPv4len
+	}
+
+	buf := make([]byte, 8+iplen)
+	buf[0] = cMDReqCreated
+	binary.LittleEndian.PutUint16(buf[1:], idx)
+	binary.LittleEndian.PutUint16(buf[3:], tag)
+
+	if src.IP.To4() != nil {
+		// ipv4
+		buf[5] = 0
+		src := addr.To4()
+		copy(buf[6:], src[:])
+	} else {
+		// ipv6
+		buf[5] = 2
+		src := addr.To16()
+		copy(buf[6:], src[:])
+	}
+
+	binary.LittleEndian.PutUint16(buf[6+iplen:], uint16(port))
+
+	t.write(buf)
 }
