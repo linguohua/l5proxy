@@ -36,8 +36,8 @@ func (c *Cache) get(src *net.UDPAddr) *Ustub {
 	return nil
 }
 
-func (c *Cache) remove(src *net.UDPAddr) {
-	key := c.key(src)
+func (c *Cache) remove(ustub *Ustub) {
+	key := c.key(ustub.srcAddr)
 	c.ustubs.Delete(key)
 }
 
@@ -71,4 +71,12 @@ func (c *Cache) key(src *net.UDPAddr) string {
 	copy(buf[2:], src.IP)
 
 	return hex.EncodeToString(buf)
+}
+
+func (c *Cache) cleanup() {
+	c.ustubs.Range(func(key, value interface{}) bool {
+		ustub := value.(*Ustub)
+		ustub.close()
+		return true // Continue iterating
+	})
 }

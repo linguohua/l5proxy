@@ -23,12 +23,16 @@ var (
 
 	whitelistA *Whitelist = nil
 	whitelistB *Whitelist = nil
+
+	udpServ *UDPServ = nil
 )
 
 type Whitelist struct {
 	domainsData []byte
 	version     int
 }
+
+type AddressMap map[string]string
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
@@ -44,13 +48,19 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var endpoint = r.URL.Query().Get("endpoint")
+	if endpoint == "" {
+		log.Println("need endpoint!")
+		return
+	}
+
 	account, ok := accountMap[uuid]
 	if !ok {
 		log.Println("no account found for uuid:", uuid)
 		return
 	}
 
-	account.acceptWebsocket(c)
+	account.acceptWebsocket(c, udpServ, endpoint)
 }
 
 // indexHandler responds to requests with our greeting.
@@ -186,10 +196,49 @@ func setupWhitelists(dir string) {
 	whitelistB = setupWhitelist(path2)
 }
 
+func setupAddressMap(addressMapFilePath string) map[string]AddressMap {
+	fileBytes, err := ioutil.ReadFile(addressMapFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		log.Panicln("read addressmap cfg file failed:", err)
+	}
+
+	type jsonstruct struct {
+		AddressMaps map[string]AddressMap `json:"udpmap"`
+	}
+	var addressMap = jsonstruct{}
+	err = json.Unmarshal(fileBytes, &addressMap)
+	if err != nil {
+		log.Panicln("parse addressmap cfg file failed:", err)
+	}
+
+	return addressMap.AddressMaps
+}
+
+func setupUdpAddressMap(dir string) {
+	path := path.Join(dir, "addressmap.json")
+	addressMaps := setupAddressMap(path)
+
+	udpRevSers, err := newUDPServ(addressMaps)
+	if err != nil {
+		log.Panicln("new udp reverse server failed:", err)
+	}
+
+	udpServ = udpRevSers
+	// for _, account := range accountMap {
+	// 	account.setUDPReverseServ(udpRevSers)
+	// }
+
+}
+
 // CreateHTTPServer start http server
 func CreateHTTPServer(listenAddr string, wsPath string, accountFilePath string) {
 	setupBuiltinAccount(accountFilePath)
 	setupWhitelists(path.Join(path.Dir(accountFilePath)))
+	setupUdpAddressMap(path.Join(path.Dir(accountFilePath)))
 
 	var err error
 	dnsServerAddr, err = net.ResolveUDPAddr("udp", "8.8.8.8:53")

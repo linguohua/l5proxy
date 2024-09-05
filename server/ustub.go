@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -16,22 +15,23 @@ type Ustub struct {
 	lastActvity time.Time
 }
 
-func newUstub(tun *Tunnel, srcAddr *net.UDPAddr) *Ustub {
-	udpAddr, err := net.ResolveUDPAddr("udp", "0.0.0.0:0")
+func newUDPConn(addr string) (*net.UDPConn, error) {
+	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		fmt.Println("Error resolving UDP address:", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("Error resolving UDP address: %s", err.Error())
 	}
 
 	conn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		fmt.Println("Error creating UDP connection:", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("Error creating UDP connection: %s", err.Error())
 	}
 
-	fmt.Printf("udp proxy on %s\n", conn.LocalAddr().String())
+	log.Infof("udp proxy on %s", conn.LocalAddr().String())
+	return conn, nil
+}
 
-	ustub := &Ustub{tun: tun, conn: conn, srcAddr: srcAddr}
+func newUstub(tun *Tunnel, udpConn *net.UDPConn, srcAddr *net.UDPAddr) *Ustub {
+	ustub := &Ustub{tun: tun, conn: udpConn, srcAddr: srcAddr}
 	go ustub.proxy()
 	return ustub
 }
@@ -69,16 +69,20 @@ func (u *Ustub) writeTo(dest *net.UDPAddr, data []byte) error {
 }
 
 func (u *Ustub) onServerData(data []byte, dest *net.UDPAddr) {
-	log.Println("onServerData dest ", dest.String())
+	log.Infof("onServerData dest %s, ip len: %d", dest.String(), len(dest.IP))
 
 	u.lastActvity = time.Now()
-	u.tun.onServerData(data, u.srcAddr, dest)
+
+	if u.tun != nil {
+		u.tun.onServerUDPData(data, u.srcAddr, dest)
+	}
 }
 
 func (u *Ustub) proxy() {
 	conn := u.conn
-
 	defer conn.Close()
+	// defer u.cache.remove(u)
+	// TODO: remove ustub from cache when conn close
 
 	buffer := make([]byte, 4096)
 
@@ -88,8 +92,16 @@ func (u *Ustub) proxy() {
 			return
 		}
 
-		u.onServerData(buffer[:n], addr)
+		// use len(dest.IP) check ipv4 or ipv6
+		dest := &net.UDPAddr{Port: addr.Port}
+		if addr.IP.To4() != nil {
+			dest.IP = addr.IP.To4()
+		} else {
+			dest.IP = addr.IP.To16()
+		}
+		u.onServerData(buffer[:n], dest)
 	}
+
 }
 
 func (u *Ustub) close() {

@@ -34,7 +34,7 @@ func newAccount(uc *AccountConfig) *Account {
 	}
 }
 
-func (a *Account) acceptWebsocket(conn *websocket.Conn) {
+func (a *Account) acceptWebsocket(conn *websocket.Conn, udpServ *UDPServ, endpoint string) {
 	log.Printf("account:%s accept websocket, total:%d", a.uuid, 1+len(a.tunnels))
 
 	if a.maxTunnel > 0 && uint(len(a.tunnels)) >= a.maxTunnel {
@@ -45,7 +45,8 @@ func (a *Account) acceptWebsocket(conn *websocket.Conn) {
 	idx := a.tidx
 	a.tidx++
 
-	tun := newTunnel(idx, conn, 200, a.rateLimit)
+	tun := newTunnel(idx, conn, 200, a.rateLimit, endpoint, udpServ)
+	// tun.reverseServ = a.reverseServ
 	a.tunnels[idx] = tun
 	defer delete(a.tunnels, idx)
 

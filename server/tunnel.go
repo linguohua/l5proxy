@@ -38,9 +38,12 @@ type Tunnel struct {
 	rateChan  chan []byte
 	rateWg    *sync.WaitGroup
 	cache     *Cache
+	endpoint  string
+	udpServ   *UDPServ
+	// reverseServ *UDPReverseServers
 }
 
-func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint) *Tunnel {
+func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont string, udpserv *UDPServ) *Tunnel {
 
 	t := &Tunnel{
 		id:        id,
@@ -48,6 +51,8 @@ func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint) *Tunnel {
 		rateLimit: rateLimit,
 		rateQuota: rateLimit,
 		cache:     newCache(),
+		endpoint:  endpiont,
+		udpServ:   udpserv,
 	}
 
 	reqq := newReqq(cap, t)
@@ -68,6 +73,7 @@ func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint) *Tunnel {
 		t.rateChan = make(chan []byte, 100)
 	}
 
+	udpserv.onTunnelConnect(t)
 	return t
 }
 
@@ -172,6 +178,8 @@ func (t *Tunnel) onClose() {
 	}
 
 	t.reqq.cleanup()
+	t.udpServ.onTunnelClose(t)
+
 }
 
 func (t *Tunnel) onTunnelMessage(message []byte) error {
@@ -331,21 +339,34 @@ func (t *Tunnel) handleUDPReq(data []byte) {
 	src := parseAddress(data[1:])
 	dest := parseAddress(data[1+3+len(src.IP):])
 
-	log.Infof("handleUDPReq src %s dest %s", src.String(), dest.String())
+	log.Debugf("handleUDPReq src %s dest %s", src.String(), dest.String())
+
+	// 7 = cmd + iptype1 + iptype2 + port1 + port2
+	skip := 7 + len(src.IP) + len(dest.IP)
+
+	conn := t.udpServ.getUDPConn(t.endpoint, src)
+	if conn != nil {
+		conn.WriteTo(data[skip:], dest)
+		return
+	}
 
 	ustub := t.cache.get(src)
 	if ustub == nil {
-		ustub = newUstub(t, src)
+		udpConn, err := newUDPConn("0.0.0.0:0")
+		if err != nil {
+			log.Errorf("New UDPConn failed:%s", err.Error())
+			return
+		}
+		ustub = newUstub(t, udpConn, src)
 		t.cache.add(ustub)
 		log.Infof("new ustub src %s", src.String())
 	}
 
-	skip := 7 + len(src.IP) + len(dest.IP)
 	ustub.writeTo(dest, data[skip:])
 }
 
-func (t *Tunnel) onServerData(data []byte, src *net.UDPAddr, dest *net.UDPAddr) {
-	log.Infof("onServerData src %s dest %s", src, dest)
+func (t *Tunnel) onServerUDPData(data []byte, src *net.UDPAddr, dest *net.UDPAddr) {
+	log.Debugf("onServerData src %s dest %s", src, dest)
 
 	srcAddrBuf := writeAddress(src)
 	destAddrBuf := writeAddress(dest)

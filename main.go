@@ -42,6 +42,7 @@ func getVersion() string {
 func main() {
 	// only one thread
 	runtime.GOMAXPROCS(1)
+	log.SetLevel(log.DebugLevel)
 
 	version := flag.Bool("v", false, "show version")
 
