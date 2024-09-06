@@ -54,12 +54,14 @@ func (u *Ustub) writeTo(dest *net.UDPAddr, data []byte) error {
 }
 
 func (u *Ustub) onServerData(data []byte, dest *net.UDPAddr) {
-	log.Infof("onServerData dest %s, ip len: %d", dest.String(), len(dest.IP))
+	log.Debugf("onServerData dest %s", dest.String())
 
 	u.lastActvity = time.Now()
 
 	if u.tun != nil {
 		u.tun.onServerUDPData(data, u.srcAddr, dest)
+	} else {
+		log.Errorf("Ustub.onServerData u.tun == nil")
 	}
 }
 
@@ -77,7 +79,6 @@ func (u *Ustub) proxy() {
 			return
 		}
 
-		// use len(dest.IP) check ipv4 or ipv6
 		dest := &net.UDPAddr{Port: addr.Port}
 		if addr.IP.To4() != nil {
 			dest.IP = addr.IP.To4()

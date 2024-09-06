@@ -6,8 +6,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 )
 
 const udpTimeOut = 120 * time.Second
@@ -23,7 +21,7 @@ func newCache() *Cache {
 
 func (c *Cache) add(ustub *Ustub) {
 	key := c.key(ustub.srcAddr)
-	log.Infof("add key %s", key)
+	// log.Infof("add key %s", key)
 	c.ustubs.Store(key, ustub)
 }
 
@@ -65,10 +63,19 @@ func (c *Cache) keepalive() {
 }
 
 func (c *Cache) key(src *net.UDPAddr) string {
-	buf := make([]byte, 2+len(src.IP))
+	iplen := net.IPv6len
+	if src.IP.To4() != nil {
+		iplen = net.IPv4len
+	}
 
+	buf := make([]byte, 2+iplen)
 	binary.LittleEndian.PutUint16(buf[0:], uint16(src.Port))
-	copy(buf[2:], src.IP)
+
+	if iplen == net.IPv4len {
+		copy(buf[2:], src.IP.To4())
+	} else {
+		copy(buf[2:], src.IP.To16())
+	}
 
 	return hex.EncodeToString(buf)
 }

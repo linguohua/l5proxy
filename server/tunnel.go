@@ -337,13 +337,26 @@ func (t *Tunnel) onRequestData(req *Request, data []byte) {
 func (t *Tunnel) handleUDPReq(data []byte) {
 	// skip cmd
 	src := parseAddress(data[1:])
-	dest := parseAddress(data[1+3+len(src.IP):])
+
+	srcIPLen := net.IPv6len
+	if src.IP.To4() != nil {
+		srcIPLen = net.IPv4len
+	}
+
+	// 4 = cmd + iptype + port
+	dest := parseAddress(data[4+srcIPLen:])
+
+	destIPLen := net.IPv6len
+	if dest.IP.To4() != nil {
+		destIPLen = net.IPv4len
+	}
 
 	log.Debugf("handleUDPReq src %s dest %s", src.String(), dest.String())
 
 	// 7 = cmd + iptype1 + iptype2 + port1 + port2
-	skip := 7 + len(src.IP) + len(dest.IP)
+	skip := 7 + srcIPLen + destIPLen
 
+	// write to reverse proxy of udp conn
 	conn := t.reverseServ.getUDPConn(t.endpoint, src)
 	if conn != nil {
 		conn.WriteTo(data[skip:], dest)
@@ -383,7 +396,7 @@ func (t *Tunnel) onServerUDPData(data []byte, src *net.UDPAddr, dest *net.UDPAdd
 
 func parseAddress(msg []byte) *net.UDPAddr {
 	// skip cmd
-	var ip = make([]byte, 0)
+	var ip []byte = nil
 
 	offset := 0
 	port := binary.LittleEndian.Uint16(msg[offset:])
@@ -395,31 +408,37 @@ func parseAddress(msg []byte) *net.UDPAddr {
 	switch ipType {
 	case 0:
 		// ipv4
-		ip = msg[offset : offset+4]
-		offset += 4
+		ip = make([]byte, net.IPv4len)
+		copy(ip[0:], msg[offset:offset+4])
 	case 2:
 		// ipv6
-		ip = msg[offset : offset+16]
+		ip = make([]byte, net.IPv6len)
+		copy(ip[0:], msg[offset:offset+16])
 	}
 
 	return &net.UDPAddr{IP: ip, Port: int(port)}
 }
 
-func writeAddress(addrss *net.UDPAddr) []byte {
+func writeAddress(address *net.UDPAddr) []byte {
+	iplen := net.IPv6len
+	if address.IP.To4() != nil {
+		iplen = net.IPv4len
+	}
 	// 3 = iptype(1) + port(2)
-	buf := make([]byte, 3+len(addrss.IP))
+	buf := make([]byte, 3+iplen)
 	// add port
-	binary.LittleEndian.PutUint16(buf[0:], uint16(addrss.Port))
+	binary.LittleEndian.PutUint16(buf[0:], uint16(address.Port))
 	// set ip type
-	if len(addrss.IP) > net.IPv4len {
+	if iplen > net.IPv4len {
 		// ipv6
 		buf[2] = 2
+		copy(buf[3:], address.IP.To16())
 	} else {
 		// ipv4
 		buf[2] = 0
+		copy(buf[3:], address.IP.To4())
 	}
 
-	copy(buf[3:], addrss.IP)
 	return buf
 }
 
@@ -439,9 +458,10 @@ func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
 }
 
 func (t *Tunnel) onClientCreate(src *net.TCPAddr, idx, tag uint16) {
+	// log.Infof("Tunnel.onClientCreate src", src.String())
+
 	addr := src.IP
 	port := src.Port
-	log.Infof("local address %s local port %d", addr, port)
 
 	iplen := net.IPv6len
 	if src.IP.To4() != nil {

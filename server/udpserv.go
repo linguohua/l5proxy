@@ -94,7 +94,6 @@ func (udpServ *UDPServ) udpProxy(conn *net.UDPConn, srcAddr *net.UDPAddr, endpoi
 			return
 		}
 
-		// use len(dest.IP) check ipv4 or ipv6
 		dest := &net.UDPAddr{Port: addr.Port}
 		if addr.IP.To4() != nil {
 			dest.IP = addr.IP.To4()
@@ -107,9 +106,19 @@ func (udpServ *UDPServ) udpProxy(conn *net.UDPConn, srcAddr *net.UDPAddr, endpoi
 }
 
 func key(src *net.UDPAddr) string {
-	buf := make([]byte, 2+len(src.IP))
+	iplen := net.IPv6len
+	if src.IP.To4() != nil {
+		iplen = net.IPv4len
+	}
+
+	buf := make([]byte, 2+iplen)
 	binary.LittleEndian.PutUint16(buf[0:], uint16(src.Port))
-	copy(buf[2:], src.IP)
+
+	if iplen == net.IPv4len {
+		copy(buf[2:], src.IP.To4())
+	} else {
+		copy(buf[2:], src.IP.To16())
+	}
 
 	return hex.EncodeToString(buf)
 }
