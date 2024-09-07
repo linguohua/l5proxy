@@ -381,8 +381,8 @@ func (t *Tunnel) handleUDPReq(data []byte) {
 func (t *Tunnel) onServerUDPData(data []byte, src *net.UDPAddr, dest *net.UDPAddr) {
 	log.Debugf("onServerData src %s dest %s", src, dest)
 
-	srcAddrBuf := writeAddress(src)
-	destAddrBuf := writeAddress(dest)
+	srcAddrBuf := writeUDPAddress(src)
+	destAddrBuf := writeUDPAddress(dest)
 
 	buf := make([]byte, 1+len(srcAddrBuf)+len(destAddrBuf)+len(data))
 
@@ -419,7 +419,30 @@ func parseAddress(msg []byte) *net.UDPAddr {
 	return &net.UDPAddr{IP: ip, Port: int(port)}
 }
 
-func writeAddress(address *net.UDPAddr) []byte {
+func writeUDPAddress(address *net.UDPAddr) []byte {
+	iplen := net.IPv6len
+	if address.IP.To4() != nil {
+		iplen = net.IPv4len
+	}
+	// 3 = iptype(1) + port(2)
+	buf := make([]byte, 3+iplen)
+	// add port
+	binary.LittleEndian.PutUint16(buf[0:], uint16(address.Port))
+	// set ip type
+	if iplen > net.IPv4len {
+		// ipv6
+		buf[2] = 2
+		copy(buf[3:], address.IP.To16())
+	} else {
+		// ipv4
+		buf[2] = 0
+		copy(buf[3:], address.IP.To4())
+	}
+
+	return buf
+}
+
+func writeTCPAddress(address *net.TCPAddr) []byte {
 	iplen := net.IPv6len
 	if address.IP.To4() != nil {
 		iplen = net.IPv4len
@@ -449,7 +472,14 @@ func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
 		return err
 	}
 
-	t.onClientCreate(src, req.idx, req.tag)
+	addr := conn.RemoteAddr()
+
+	dest, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return fmt.Errorf("can not convert net.Addr to net.TCPAddr")
+	}
+
+	t.onClientCreate(src, dest, req.idx, req.tag)
 
 	// start a new goroutine to read data from 'conn'
 	go req.proxy()
@@ -457,35 +487,20 @@ func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
 	return nil
 }
 
-func (t *Tunnel) onClientCreate(src *net.TCPAddr, idx, tag uint16) {
+func (t *Tunnel) onClientCreate(src, dest *net.TCPAddr, idx, tag uint16) {
 	// log.Infof("Tunnel.onClientCreate src", src.String())
 
-	addr := src.IP
-	port := src.Port
+	srcAddrBuf := writeTCPAddress(src)
+	destAddrBuf := writeTCPAddress(dest)
 
-	iplen := net.IPv6len
-	if src.IP.To4() != nil {
-		iplen = net.IPv4len
-	}
+	buf := make([]byte, 5+len(srcAddrBuf)+len(destAddrBuf))
 
-	buf := make([]byte, 8+iplen)
-	buf[0] = cMDReqCreated
+	buf[0] = byte(cMDReqCreated)
 	binary.LittleEndian.PutUint16(buf[1:], idx)
 	binary.LittleEndian.PutUint16(buf[3:], tag)
 
-	if src.IP.To4() != nil {
-		// ipv4
-		buf[5] = 0
-		src := addr.To4()
-		copy(buf[6:], src[:])
-	} else {
-		// ipv6
-		buf[5] = 2
-		src := addr.To16()
-		copy(buf[6:], src[:])
-	}
-
-	binary.LittleEndian.PutUint16(buf[6+iplen:], uint16(port))
+	copy(buf[5:], srcAddrBuf)
+	copy(buf[5+len(srcAddrBuf):], destAddrBuf)
 
 	t.write(buf)
 }
