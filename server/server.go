@@ -206,17 +206,52 @@ func setupAddressMap(addressMapFilePath string) (map[string]AddressMap, map[stri
 		log.Panicf("read addressmap cfg file %s failed:%s", addressMapFilePath, err.Error())
 	}
 
-	type jsonstruct struct {
-		UDPAddressMaps map[string]AddressMap `json:"udpmap"`
-		TCPAddressMaps map[string]AddressMap `json:"tcpmap"`
+	type EndpointAdressMap struct {
+		Endpoint   string     `json:"endpoint"`
+		AddressMap AddressMap `json:"addressmap"`
 	}
-	var addressMap = jsonstruct{}
-	err = json.Unmarshal(fileBytes, &addressMap)
+
+	type jsonstruct struct {
+		UDPAddressMaps []EndpointAdressMap `json:"udpmap"`
+		TCPAddressMaps []EndpointAdressMap `json:"tcpmap"`
+	}
+	var endpointAddressMaps = jsonstruct{}
+	err = json.Unmarshal(fileBytes, &endpointAddressMaps)
 	if err != nil {
 		log.Panicln("parse addressmap cfg file failed:", err)
 	}
 
-	return addressMap.TCPAddressMaps, addressMap.UDPAddressMaps
+	tcpAddressMap := make(map[string]AddressMap)
+	for _, endpointAdressMap := range endpointAddressMaps.TCPAddressMaps {
+		addressmap := tcpAddressMap[endpointAdressMap.Endpoint]
+		if addressmap == nil {
+			tcpAddressMap[endpointAdressMap.Endpoint] = endpointAdressMap.AddressMap
+			continue
+		}
+
+		for k, v := range endpointAdressMap.AddressMap {
+			addressmap[k] = v
+		}
+
+		tcpAddressMap[endpointAdressMap.Endpoint] = addressmap
+	}
+
+	udpAddressMap := make(map[string]AddressMap)
+	for _, endpointAdressMap := range endpointAddressMaps.UDPAddressMaps {
+		addressmap := udpAddressMap[endpointAdressMap.Endpoint]
+		if addressmap == nil {
+			udpAddressMap[endpointAdressMap.Endpoint] = endpointAdressMap.AddressMap
+			continue
+		}
+
+		for k, v := range endpointAdressMap.AddressMap {
+			addressmap[k] = v
+		}
+
+		udpAddressMap[endpointAdressMap.Endpoint] = addressmap
+	}
+
+	return tcpAddressMap, udpAddressMap
 }
 
 func setupReverseServAddressMap(dir string) {
