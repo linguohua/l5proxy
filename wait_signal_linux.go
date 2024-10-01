@@ -1,20 +1,21 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func waitForSignal() {
 	for {
 		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGUSR1, syscall.SIGUSR2)
+		signal.Notify(c, os.Interrupt, syscall.SIGUSR1, syscall.SIGUSR2)
 
 		// Block until a signal is received.
 		s := <-c
-		fmt.Println("Got signal:", s)
+		log.Infof("Got signal:%s", s.String())
 
 		if s == syscall.SIGUSR1 {
 			dumpGoRoutinesInfo()

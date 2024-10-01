@@ -72,7 +72,7 @@ func (q *Reqq) free(idx uint16, tag uint16) error {
 		return fmt.Errorf("free, req %d:%d is in not match tag %d", idx, tag, req.tag)
 	}
 
-	// log.Printf("reqq free req %d:%d", idx, tag)
+	// log.Infof("reqq free req %d:%d", idx, tag)
 
 	req.dofree()
 	req.tag++

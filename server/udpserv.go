@@ -52,12 +52,12 @@ func newUDPServ(reverse *ReverseServ, addrssMaps map[string]AddressMap) (*UDPSer
 func newUDPConn(addr string) (*net.UDPConn, error) {
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("Error resolving UDP address: %s", err.Error())
+		return nil, fmt.Errorf("resolving UDP address: %s", err.Error())
 	}
 
 	conn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		return nil, fmt.Errorf("Error creating UDP connection: %s", err.Error())
+		return nil, fmt.Errorf("creating UDP connection: %s", err.Error())
 	}
 
 	log.Infof("udp proxy on %s", conn.LocalAddr().String())

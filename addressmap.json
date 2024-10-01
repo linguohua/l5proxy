@@ -1,13 +1,30 @@
 {
-        
-    "udpmap":[
-        { "endping":"e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49","addressmap":{"192.168.0.154:5000":"192.168.0.154:5000"}}
+    "udpmap": [
+        {
+            "endpoint": "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49",
+            "addressmap": {
+                "192.168.0.154:5000": "192.168.0.154:5000"
+            }
+        }
     ],
-
-    "tcpmap":[
-        { "endping":"e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49","addressmap":{"192.168.0.154:5000":"192.168.0.154:5000"}},
-        { "endping":"e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49","addressmap":{"192.168.0.154:4000":"192.168.0.154:4000"}},
-        { "endping":"e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49","addressmap":{"192.168.0.154:4000":"192.168.0.154:4000"}}
+    "tcpmap": [
+        {
+            "endpoint": "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49",
+            "addressmap": {
+                "192.168.0.154:5000": "192.168.0.154:5000"
+            }
+        },
+        {
+            "endpoint": "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49",
+            "addressmap": {
+                "192.168.0.154:4000": "192.168.0.154:4000"
+            }
+        },
+        {
+            "endpoint": "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49",
+            "addressmap": {
+                "192.168.0.154:4000": "192.168.0.154:4000"
+            }
+        }
     ]
-
 }

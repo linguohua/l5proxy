@@ -8,30 +8,30 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type Ustub struct {
+type UdpStub struct {
 	tun         *Tunnel
 	conn        *net.UDPConn
 	srcAddr     *net.UDPAddr
 	lastActvity time.Time
 }
 
-func newUstub(tun *Tunnel, udpConn *net.UDPConn, srcAddr *net.UDPAddr) *Ustub {
-	ustub := &Ustub{tun: tun, conn: udpConn, srcAddr: srcAddr}
+func newUdpStub(tun *Tunnel, udpConn *net.UDPConn, srcAddr *net.UDPAddr) *UdpStub {
+	ustub := &UdpStub{tun: tun, conn: udpConn, srcAddr: srcAddr}
 	go ustub.proxy()
 	return ustub
 }
 
-func (u *Ustub) writeTo(dest *net.UDPAddr, data []byte) error {
+func (u *UdpStub) writeTo(dest *net.UDPAddr, data []byte) error {
 	conn := u.conn
 	if conn == nil {
-		return fmt.Errorf("Write udp conn == nil")
+		return fmt.Errorf("write udp conn == nil")
 	}
 
 	log.Infof("writeMessage to %s", dest.String())
 
 	u.lastActvity = time.Now()
 
-	destAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s", dest.String()))
+	destAddr, err := net.ResolveUDPAddr("udp", dest.String())
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func (u *Ustub) writeTo(dest *net.UDPAddr, data []byte) error {
 	return nil
 }
 
-func (u *Ustub) onServerData(data []byte, dest *net.UDPAddr) {
+func (u *UdpStub) onServerData(data []byte, dest *net.UDPAddr) {
 	log.Debugf("onServerData dest %s", dest.String())
 
 	u.lastActvity = time.Now()
@@ -61,11 +61,11 @@ func (u *Ustub) onServerData(data []byte, dest *net.UDPAddr) {
 	if u.tun != nil {
 		u.tun.onServerUDPData(data, u.srcAddr, dest)
 	} else {
-		log.Errorf("Ustub.onServerData u.tun == nil")
+		log.Errorf("UdpStub.onServerData u.tun == nil")
 	}
 }
 
-func (u *Ustub) proxy() {
+func (u *UdpStub) proxy() {
 	conn := u.conn
 	defer conn.Close()
 	// defer u.cache.remove(u)
@@ -90,6 +90,6 @@ func (u *Ustub) proxy() {
 
 }
 
-func (u *Ustub) close() {
+func (u *UdpStub) close() {
 	u.conn.Close()
 }

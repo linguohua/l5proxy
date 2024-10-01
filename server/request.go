@@ -39,9 +39,9 @@ func (r *Request) onClientData(data []byte) {
 	if r.conn != nil {
 		err := writeAll(data, r.conn)
 		if err != nil {
-			log.Println("onClientData, write failed:", err)
+			log.Errorf("onClientData, write failed:%s", err)
 		} //else {
-		// log.Println("onClientData, write:", len(data))
+		// log.Infof("onClientData, write bytes length:%d", len(data))
 		//}
 	}
 }
@@ -62,18 +62,18 @@ func (r *Request) proxy() {
 
 		if !r.isUsed {
 			// request is free!
-			log.Println("proxy read, request is free, discard data:", n)
+			log.Debug("proxy read, request is free, discard data:", n)
 			break
 		}
 
 		if err != nil {
-			// log.Println("proxy read failed:", err)
+			// log.Debug("proxy read failed:", err)
 			r.t.onRequestTerminate(r)
 			break
 		}
 
 		if n == 0 {
-			// log.Println("proxy read, server half close")
+			// log.Debug("proxy read, server half close")
 			r.t.onRequestHalfClosed(r)
 			break
 		}

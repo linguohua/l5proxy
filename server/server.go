@@ -3,11 +3,9 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
-	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -21,42 +19,34 @@ var (
 	accountMap    = make(map[string]*Account)
 	dnsServerAddr *net.UDPAddr
 
-	whitelistA *Whitelist = nil
-	whitelistB *Whitelist = nil
-
 	reverseServer *ReverseServ = nil
 )
-
-type Whitelist struct {
-	domainsData []byte
-	version     int
-}
 
 type AddressMap map[string]string
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Print("upgrade:", err)
+		log.Errorf("upgrade:%s", err)
 		return
 	}
 	defer c.Close()
 
 	var uuid = r.URL.Query().Get("uuid")
 	if uuid == "" {
-		log.Println("need uuid!")
+		log.Error("need uuid!")
 		return
 	}
 
 	var endpoint = r.URL.Query().Get("endpoint")
 	if endpoint == "" {
-		log.Println("need endpoint!")
+		log.Error("need endpoint!")
 		return
 	}
 
 	account, ok := accountMap[uuid]
 	if !ok {
-		log.Println("no account found for uuid:", uuid)
+		log.Errorf("no account found for uuid:%s", uuid)
 		return
 	}
 
@@ -70,47 +60,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprint(w, "Hello, Stupid!")
-}
-
-func whitelistHandler(w http.ResponseWriter, r *http.Request) {
-	handled := false
-	defer func() {
-		if !handled {
-			http.NotFound(w, r)
-			return
-		}
-	}()
-
-	// query string: version
-	query := r.URL.Query()
-	versionStr := query.Get("version")
-	uuid := query.Get("uuid")
-	var whitelist *Whitelist = whitelistA
-
-	if uuid != "" {
-		account, ok := accountMap[uuid]
-		if ok {
-			if !account.useWhitelistA {
-				whitelist = whitelistB
-			}
-		}
-	}
-
-	if whitelist == nil {
-		return
-	}
-
-	version, err := strconv.Atoi(versionStr)
-	if err != nil {
-		return
-	}
-
-	if whitelist.version <= version {
-		return
-	}
-
-	w.Write(whitelist.domainsData)
-	handled = true
 }
 
 func keepalive() {
@@ -133,7 +82,7 @@ func keepalive() {
 }
 
 func setupBuiltinAccount(accountFilePath string) {
-	fileBytes, err := ioutil.ReadFile(accountFilePath)
+	fileBytes, err := os.ReadFile(accountFilePath)
 	if err != nil {
 		log.Panicln("read account cfg file failed:", err)
 	}
@@ -155,45 +104,7 @@ func setupBuiltinAccount(accountFilePath string) {
 		accountMap[a.UUID] = newAccount(a)
 	}
 
-	log.Println("load account ok, number of account:", len(accountCfgs.Accounts))
-}
-
-func setupWhitelist(whitelistFilePath string) *Whitelist {
-	fileBytes, err := ioutil.ReadFile(whitelistFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-
-		log.Panicln("read domain cfg file failed:", err)
-	}
-
-	type jsonstruct struct {
-		Version int `json:"version"`
-	}
-
-	var domains = &jsonstruct{}
-	err = json.Unmarshal(fileBytes, domains)
-	if err != nil {
-		log.Panicln("parse domain cfg file failed:", err)
-	}
-
-	whitelist := &Whitelist{
-		version:     domains.Version,
-		domainsData: fileBytes,
-	}
-
-	log.Printf("load domain ok, path:%s, version:%d", whitelistFilePath, whitelist.version)
-
-	return whitelist
-}
-
-func setupWhitelists(dir string) {
-	path1 := path.Join(dir, "whitelist-a.json")
-	path2 := path.Join(dir, "whitelist-b.json")
-
-	whitelistA = setupWhitelist(path1)
-	whitelistB = setupWhitelist(path2)
+	log.Infof("load account ok, number of account:%d", len(accountCfgs.Accounts))
 }
 
 func setupAddressMap(addressMapFilePath string) (map[string]AddressMap, map[string]AddressMap) {
@@ -270,7 +181,6 @@ func setupReverseServAddressMap(dir string) {
 // CreateHTTPServer start http server
 func CreateHTTPServer(listenAddr string, wsPath string, accountFilePath string) {
 	setupBuiltinAccount(accountFilePath)
-	setupWhitelists(path.Join(path.Dir(accountFilePath)))
 	setupReverseServAddressMap(path.Join(path.Dir(accountFilePath)))
 
 	var err error
@@ -282,7 +192,6 @@ func CreateHTTPServer(listenAddr string, wsPath string, accountFilePath string) 
 	go keepalive()
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc(wsPath, wsHandler)
-	http.HandleFunc(wsPath+"110", whitelistHandler)
-	log.Printf("server listen at:%s, path:%s", listenAddr, wsPath)
+	log.Infof("server listen at:%s, path:%s", listenAddr, wsPath)
 	log.Fatal(http.ListenAndServe(listenAddr, nil))
 }

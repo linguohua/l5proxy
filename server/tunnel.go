@@ -37,7 +37,7 @@ type Tunnel struct {
 	rateQuota   uint
 	rateChan    chan []byte
 	rateWg      *sync.WaitGroup
-	cache       *Cache
+	udpCache    *UdpCache
 	endpoint    string
 	reverseServ *ReverseServ
 	// reverseServ *UDPReverseServers
@@ -50,7 +50,7 @@ func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont s
 		conn:        conn,
 		rateLimit:   rateLimit,
 		rateQuota:   rateLimit,
-		cache:       newCache(),
+		udpCache:    newUdpCache(),
 		endpoint:    endpiont,
 		reverseServ: reverseServ,
 	}
@@ -124,14 +124,14 @@ func (t *Tunnel) serve() {
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
-			log.Println("Tunnel read failed:", err)
+			log.Errorf("Tunnel read failed:%s", err)
 			break
 		}
 
-		// log.Println("Tunnel recv message, len:", len(message))
+		// log.Infof("Tunnel recv message, len:%d", len(message))
 		err = t.onTunnelMessage(message)
 		if err != nil {
-			log.Println("Tunnel onTunnelMessage failed:", err)
+			log.Errorf("Tunnel onTunnelMessage failed:%s", err)
 			break
 		}
 	}
@@ -153,6 +153,8 @@ func (t *Tunnel) keepalive() {
 	t.writeLock.Unlock()
 
 	t.waitping++
+
+	t.udpCache.keepalive()
 }
 
 func (t *Tunnel) writePong(msg []byte) {
@@ -167,7 +169,7 @@ func (t *Tunnel) write(msg []byte) {
 	t.writeLock.Unlock()
 }
 
-func (t *Tunnel) onPong(msg []byte) {
+func (t *Tunnel) onPong(_ []byte) {
 	t.waitping = 0
 }
 
@@ -213,7 +215,7 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 		t.handleRequestClosed(idx, tag)
 
 	default:
-		log.Printf("onTunnelMessage, unsupport tunnel cmd:%d", cmd)
+		log.Infof("onTunnelMessage, unsupport tunnel cmd:%d", cmd)
 	}
 
 	return nil
@@ -244,23 +246,23 @@ func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
 		domain = fmt.Sprintf("%d:%d:%d:%d:%d:%d:%d:%d", p8, p7, p6, p5, p4, p3, p2, p1)
 		port = binary.LittleEndian.Uint16(message[17:])
 	default:
-		log.Println("handleRequestCreate, not support addressType:", addressType)
+		log.Errorf("handleRequestCreate, not support addressType:%d", addressType)
 		return
 	}
 
 	req, err := t.reqq.alloc(idx, tag)
 	if err != nil {
-		log.Println("handleRequestCreate, alloc req failed:", err)
+		log.Errorf("handleRequestCreate, alloc req failed:%v", err)
 		return
 	}
 
 	addr := fmt.Sprintf("%s:%d", domain, port)
-	log.Println("proxy to:", addr)
+	log.Infof("proxy to:%s", addr)
 
 	ts := time.Second * 2
 	c, err := net.DialTimeout("tcp", addr, ts)
 	if err != nil {
-		log.Println("proxy DialTCP failed: ", err)
+		log.Errorf("proxy DialTCP failed: %s", err)
 		t.onRequestTerminate(req)
 		return
 	}
@@ -273,7 +275,7 @@ func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
 func (t *Tunnel) handleRequestData(idx uint16, tag uint16, message []byte) {
 	req, err := t.reqq.get(idx, tag)
 	if err != nil {
-		log.Println("handleRequestData, get req failed:", err)
+		log.Errorf("handleRequestData, get req failed:%s", err)
 		return
 	}
 
@@ -283,7 +285,7 @@ func (t *Tunnel) handleRequestData(idx uint16, tag uint16, message []byte) {
 func (t *Tunnel) handleRequestFinished(idx uint16, tag uint16) {
 	req, err := t.reqq.get(idx, tag)
 	if err != nil {
-		//log.Println("handleRequestData, get req failed:", err)
+		//log.Errorf("handleRequestData, get req failed:%s", err)
 		return
 	}
 
@@ -293,7 +295,7 @@ func (t *Tunnel) handleRequestFinished(idx uint16, tag uint16) {
 func (t *Tunnel) handleRequestClosed(idx uint16, tag uint16) {
 	err := t.reqq.free(idx, tag)
 	if err != nil {
-		//log.Println("handleRequestClosed, get req failed:", err)
+		//log.Errorf("handleRequestClosed, get req failed:%s", err)
 		return
 	}
 }
@@ -344,14 +346,14 @@ func (t *Tunnel) handleUDPReq(data []byte) {
 	}
 
 	// 4 = cmd + iptype + port
-	dest := parseAddress(data[4+srcIPLen:])
+	dst := parseAddress(data[4+srcIPLen:])
 
 	destIPLen := net.IPv6len
-	if dest.IP.To4() != nil {
+	if dst.IP.To4() != nil {
 		destIPLen = net.IPv4len
 	}
 
-	log.Debugf("handleUDPReq src %s dest %s", src.String(), dest.String())
+	log.Debugf("handleUDPReq src %s dst %s", src.String(), dst.String())
 
 	// 7 = cmd + iptype1 + iptype2 + port1 + port2
 	skip := 7 + srcIPLen + destIPLen
@@ -359,30 +361,30 @@ func (t *Tunnel) handleUDPReq(data []byte) {
 	// write to reverse proxy of udp conn
 	conn := t.reverseServ.getUDPConn(t.endpoint, src)
 	if conn != nil {
-		conn.WriteTo(data[skip:], dest)
+		conn.WriteTo(data[skip:], dst)
 		return
 	}
 
-	ustub := t.cache.get(src)
+	ustub := t.udpCache.get(src)
 	if ustub == nil {
 		udpConn, err := newUDPConn("0.0.0.0:0")
 		if err != nil {
 			log.Errorf("New UDPConn failed:%s", err.Error())
 			return
 		}
-		ustub = newUstub(t, udpConn, src)
-		t.cache.add(ustub)
+		ustub = newUdpStub(t, udpConn, src)
+		t.udpCache.add(ustub)
 		log.Infof("new ustub src %s", src.String())
 	}
 
-	ustub.writeTo(dest, data[skip:])
+	ustub.writeTo(dst, data[skip:])
 }
 
-func (t *Tunnel) onServerUDPData(data []byte, src *net.UDPAddr, dest *net.UDPAddr) {
-	log.Debugf("onServerData src %s dest %s", src, dest)
+func (t *Tunnel) onServerUDPData(data []byte, src *net.UDPAddr, dst *net.UDPAddr) {
+	log.Debugf("onServerData src %s dst %s", src, dst)
 
 	srcAddrBuf := writeUDPAddress(src)
-	destAddrBuf := writeUDPAddress(dest)
+	destAddrBuf := writeUDPAddress(dst)
 
 	buf := make([]byte, 1+len(srcAddrBuf)+len(destAddrBuf)+len(data))
 
@@ -474,12 +476,12 @@ func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
 
 	addr := conn.RemoteAddr()
 
-	dest, ok := addr.(*net.TCPAddr)
+	dst, ok := addr.(*net.TCPAddr)
 	if !ok {
 		return fmt.Errorf("can not convert net.Addr to net.TCPAddr")
 	}
 
-	t.onClientCreate(src, dest, req.idx, req.tag)
+	t.onClientCreate(src, dst, req.idx, req.tag)
 
 	// start a new goroutine to read data from 'conn'
 	go req.proxy()
@@ -487,11 +489,11 @@ func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
 	return nil
 }
 
-func (t *Tunnel) onClientCreate(src, dest *net.TCPAddr, idx, tag uint16) {
+func (t *Tunnel) onClientCreate(src, dst *net.TCPAddr, idx, tag uint16) {
 	// log.Infof("Tunnel.onClientCreate src", src.String())
 
 	srcAddrBuf := writeTCPAddress(src)
-	destAddrBuf := writeTCPAddress(dest)
+	destAddrBuf := writeTCPAddress(dst)
 
 	buf := make([]byte, 5+len(srcAddrBuf)+len(destAddrBuf))
 

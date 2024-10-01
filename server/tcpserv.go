@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net"
 
 	log "github.com/sirupsen/logrus"
@@ -42,7 +41,7 @@ func (tcpServ *TCPServ) startTCPServer(listener net.Listener, endpoint string, s
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection:", err)
+			log.Errorf("Error accepting connection:%s", err)
 			continue
 		}
 		go tcpServ.handleConnection(conn, endpoint, src)

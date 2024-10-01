@@ -1,9 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func waitForSignal() {
@@ -13,7 +14,7 @@ func waitForSignal() {
 
 		// Block until a signal is received.
 		s := <-c
-		fmt.Println("Got signal:", s)
+		log.Infof("Got signal:%s", s.String())
 
 		if s == os.Kill {
 			// how can one send a 'kill' signal to process on windows?

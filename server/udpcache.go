@@ -10,41 +10,41 @@ import (
 
 const udpTimeOut = 120 * time.Second
 
-type Cache struct {
+type UdpCache struct {
 	// key=hash(src+dest)
 	ustubs sync.Map
 }
 
-func newCache() *Cache {
-	return &Cache{}
+func newUdpCache() *UdpCache {
+	return &UdpCache{}
 }
 
-func (c *Cache) add(ustub *Ustub) {
+func (c *UdpCache) add(ustub *UdpStub) {
 	key := c.key(ustub.srcAddr)
 	// log.Infof("add key %s", key)
 	c.ustubs.Store(key, ustub)
 }
 
-func (c *Cache) get(src *net.UDPAddr) *Ustub {
+func (c *UdpCache) get(src *net.UDPAddr) *UdpStub {
 	key := c.key(src)
 	v, ok := c.ustubs.Load(key)
 	if ok {
-		return v.(*Ustub)
+		return v.(*UdpStub)
 	}
 	return nil
 }
 
-func (c *Cache) remove(ustub *Ustub) {
-	key := c.key(ustub.srcAddr)
-	c.ustubs.Delete(key)
-}
+// func (c *UdpCache) remove(ustub *UdpStub) {
+// 	key := c.key(ustub.srcAddr)
+// 	c.ustubs.Delete(key)
+// }
 
-func (c *Cache) keepalive() {
+func (c *UdpCache) keepalive() {
 	time.Sleep(time.Second * 30)
 
 	deleteKeys := make([]string, 0)
 	c.ustubs.Range(func(key, value interface{}) bool {
-		ustub := value.(*Ustub)
+		ustub := value.(*UdpStub)
 		if time.Since(ustub.lastActvity) > udpTimeOut {
 			deleteKeys = append(deleteKeys, key.(string))
 		}
@@ -55,14 +55,14 @@ func (c *Cache) keepalive() {
 	for _, key := range deleteKeys {
 		v, ok := c.ustubs.Load(key)
 		if ok {
-			ustub := v.(*Ustub)
+			ustub := v.(*UdpStub)
 			ustub.close()
 		}
 		c.ustubs.Delete(key)
 	}
 }
 
-func (c *Cache) key(src *net.UDPAddr) string {
+func (c *UdpCache) key(src *net.UDPAddr) string {
 	iplen := net.IPv6len
 	if src.IP.To4() != nil {
 		iplen = net.IPv4len
@@ -80,10 +80,10 @@ func (c *Cache) key(src *net.UDPAddr) string {
 	return hex.EncodeToString(buf)
 }
 
-func (c *Cache) cleanup() {
-	c.ustubs.Range(func(key, value interface{}) bool {
-		ustub := value.(*Ustub)
-		ustub.close()
-		return true // Continue iterating
-	})
-}
+// func (c *UdpCache) cleanup() {
+// 	c.ustubs.Range(func(key, value interface{}) bool {
+// 		ustub := value.(*UdpStub)
+// 		ustub.close()
+// 		return true // Continue iterating
+// 	})
+// }

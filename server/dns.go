@@ -17,7 +17,7 @@ func doDNSQuery(tun *Tunnel, dnsPacket []byte) {
 	case 1: // ipv6
 		skipLength = 16
 	default:
-		log.Println("doDNSQuery, unsupport address type:", addressType)
+		log.Errorf("doDNSQuery, unsupport address type:%d", addressType)
 		return
 	}
 
@@ -25,22 +25,22 @@ func doDNSQuery(tun *Tunnel, dnsPacket []byte) {
 
 	conn, err := net.DialUDP("udp", nil, dnsServerAddr)
 	if err != nil {
-		log.Println("doDNSQuery, DialUDP failed:", err)
+		log.Errorf("doDNSQuery, DialUDP failed:%s", err)
 		return
 	}
 
-	// log.Println("doDNSQuery, dns query lenght:", len(dnsPacket)-skipLength)
+	// log.Infof("doDNSQuery, dns query lenght:%d", len(dnsPacket)-skipLength)
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, err = conn.Write(dnsPacket[skipLength:])
 	if err != nil {
-		log.Println("doDNSQuery, Write failed:", err)
+		log.Errorf("doDNSQuery, Write failed:%s", err)
 		return
 	}
 
 	b := make([]byte, 600) // 600 is enough for DNS query reply
 	n, err := conn.Read(b[skipLength:])
 	if err != nil {
-		log.Println("doDNSQuery, Read failed:", err)
+		log.Errorf("doDNSQuery, Read failed:%s", err)
 		return
 	}
 
