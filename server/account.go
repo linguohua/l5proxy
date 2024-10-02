@@ -106,9 +106,13 @@ func (a *Account) acceptWebsocket(conn *websocket.Conn, reverseServ *ReverseServ
 
 func (a *Account) keepalive() {
 	a.writeLock.Lock()
-	defer a.writeLock.Unlock()
+	tunnels := make([]ITunnel, 0, len(a.tunnels))
+	for _, v := range a.tunnels {
+		tunnels = append(tunnels, v)
+	}
+	a.writeLock.Unlock()
 
-	for _, t := range a.tunnels {
+	for _, t := range tunnels {
 		t.keepalive()
 	}
 }
@@ -119,9 +123,13 @@ func (a *Account) rateLimitReset() {
 	}
 
 	a.writeLock.Lock()
-	defer a.writeLock.Unlock()
+	tunnels := make([]ITunnel, 0, len(a.tunnels))
+	for _, v := range a.tunnels {
+		tunnels = append(tunnels, v)
+	}
+	a.writeLock.Unlock()
 
-	for _, t := range a.tunnels {
+	for _, t := range tunnels {
 		t.rateLimitReset(a.rateLimit)
 	}
 }
