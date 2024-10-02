@@ -56,7 +56,7 @@ func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, en
 		a.writeLock.Unlock()
 	}()
 
-	if a.maxTunnel > 0 && uint(len(a.tunnels)+a.tunnelInBuilding) >= a.maxTunnel {
+	if a.maxTunnel > 0 && uint(len(a.tunnels)+a.tunnelInBuilding) > a.maxTunnel {
 		conn.Close()
 		return nil, fmt.Errorf("too many tunnels")
 	}
