@@ -19,7 +19,7 @@ type RelayTunnel struct {
 }
 
 func newRelayTunnel(idx int, conn *websocket.Conn, endpoint string, account string, url2 string) *RelayTunnel {
-	uu := fmt.Sprintf("%s?endpoint=%s&account=%s&", url2, endpoint, account)
+	uu := fmt.Sprintf("%s?endpoint=%s&uuid=%s&", url2, endpoint, account)
 	relayConn, _, err := websocket.DefaultDialer.Dial(uu, nil)
 	if err != nil {
 		log.Errorf("newRelayTunnel, dail to %s failed:%v", uu, err)
