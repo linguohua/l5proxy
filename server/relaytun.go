@@ -3,9 +3,14 @@ package server
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	websocketWriteDealine = 5
 )
 
 type RelayTunnel struct {
@@ -18,7 +23,8 @@ type RelayTunnel struct {
 	writeLockRelay sync.Mutex
 }
 
-func newRelayTunnel(idx int, conn *websocket.Conn, endpoint string, account string, url2 string) (*RelayTunnel, error) {
+func newRelayTunnel(idx int, conn *websocket.Conn, endpoint string,
+	account string, url2 string) (*RelayTunnel, error) {
 	uu := fmt.Sprintf("%s?endpoint=%s&uuid=%s&", url2, endpoint, account)
 	relayConn, _, err := websocket.DefaultDialer.Dial(uu, nil)
 	if err != nil {
@@ -62,6 +68,7 @@ func (t *RelayTunnel) idx() int {
 
 func (t *RelayTunnel) writeRelayPing(msg []byte) error {
 	t.writeLockRelay.Lock()
+	t.connRelay.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	err := t.connRelay.WriteMessage(websocket.PingMessage, msg)
 	t.writeLockRelay.Unlock()
 
@@ -70,6 +77,7 @@ func (t *RelayTunnel) writeRelayPing(msg []byte) error {
 
 func (t *RelayTunnel) writeRelayPong(msg []byte) error {
 	t.writeLockRelay.Lock()
+	t.connRelay.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	err := t.connRelay.WriteMessage(websocket.PongMessage, msg)
 	t.writeLockRelay.Unlock()
 
@@ -78,6 +86,7 @@ func (t *RelayTunnel) writeRelayPong(msg []byte) error {
 
 func (t *RelayTunnel) writePing(msg []byte) error {
 	t.writeLock.Lock()
+	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	err := t.conn.WriteMessage(websocket.PingMessage, msg)
 	t.writeLock.Unlock()
 
@@ -86,6 +95,7 @@ func (t *RelayTunnel) writePing(msg []byte) error {
 
 func (t *RelayTunnel) writePong(msg []byte) error {
 	t.writeLock.Lock()
+	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	err := t.conn.WriteMessage(websocket.PongMessage, msg)
 	t.writeLock.Unlock()
 
@@ -94,6 +104,7 @@ func (t *RelayTunnel) writePong(msg []byte) error {
 
 func (t *RelayTunnel) write(msg []byte) error {
 	t.writeLock.Lock()
+	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	err := t.conn.WriteMessage(websocket.BinaryMessage, msg)
 	t.writeLock.Unlock()
 
@@ -102,6 +113,7 @@ func (t *RelayTunnel) write(msg []byte) error {
 
 func (t *RelayTunnel) writeRelay(msg []byte) error {
 	t.writeLockRelay.Lock()
+	t.connRelay.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	err := t.connRelay.WriteMessage(websocket.BinaryMessage, msg)
 	t.writeLockRelay.Unlock()
 

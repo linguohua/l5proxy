@@ -2,8 +2,13 @@ package server
 
 import (
 	"net"
+	"time"
 
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	tcpSocketWriteDeadline = 5
 )
 
 // Request request
@@ -37,6 +42,7 @@ func (r *Request) onClientFinished() {
 
 func (r *Request) onClientData(data []byte) {
 	if r.conn != nil {
+		r.conn.SetWriteDeadline(time.Now().Add(tcpSocketWriteDeadline * time.Second))
 		err := writeAll(data, r.conn)
 		if err != nil {
 			log.Errorf("onClientData, write failed:%s", err)
@@ -86,6 +92,7 @@ func writeAll(buf []byte, nc net.Conn) error {
 	wrote := 0
 	l := len(buf)
 	for {
+		nc.SetWriteDeadline(time.Now().Add(tcpSocketWriteDeadline * time.Second))
 		n, err := nc.Write(buf[wrote:])
 		if err != nil {
 			return err

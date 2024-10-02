@@ -43,8 +43,8 @@ type Tunnel struct {
 	// reverseServ *UDPReverseServers
 }
 
-func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont string, reverseServ *ReverseServ) (*Tunnel, error) {
-
+func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint,
+	endpiont string, reverseServ *ReverseServ) (*Tunnel, error) {
 	t := &Tunnel{
 		id:          id,
 		conn:        conn,
@@ -153,6 +153,7 @@ func (t *Tunnel) keepalive() {
 	now := time.Now().Unix()
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, uint64(now))
+	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	t.conn.WriteMessage(websocket.PingMessage, b)
 	t.writeLock.Unlock()
 
@@ -163,12 +164,14 @@ func (t *Tunnel) keepalive() {
 
 func (t *Tunnel) writePong(msg []byte) {
 	t.writeLock.Lock()
+	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	t.conn.WriteMessage(websocket.PongMessage, msg)
 	t.writeLock.Unlock()
 }
 
 func (t *Tunnel) write(msg []byte) {
 	t.writeLock.Lock()
+	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	t.conn.WriteMessage(websocket.BinaryMessage, msg)
 	t.writeLock.Unlock()
 }
@@ -185,7 +188,6 @@ func (t *Tunnel) onClose() {
 
 	t.reqq.cleanup()
 	t.reverseServ.onTunnelClose(t)
-
 }
 
 func (t *Tunnel) onTunnelMessage(message []byte) error {

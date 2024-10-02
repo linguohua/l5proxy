@@ -8,15 +8,22 @@ import (
 	"time"
 )
 
-const udpTimeOut = 120 * time.Second
+const (
+	udpTimeOut            = 120 * time.Second
+	udpCacheKeepaliveTime = 30 * time.Second
+)
 
 type UdpCache struct {
 	// key=hash(src+dest)
 	ustubs sync.Map
+
+	lastKeepalive time.Time
 }
 
 func newUdpCache() *UdpCache {
-	return &UdpCache{}
+	return &UdpCache{
+		lastKeepalive: time.Now(),
+	}
 }
 
 func (c *UdpCache) add(ustub *UdpStub) {
@@ -40,9 +47,11 @@ func (c *UdpCache) get(src *net.UDPAddr) *UdpStub {
 // }
 
 func (c *UdpCache) keepalive() {
-	time.Sleep(time.Second * 30)
+	if time.Since(c.lastKeepalive) < udpCacheKeepaliveTime {
+		return
+	}
 
-	deleteKeys := make([]string, 0)
+	deleteKeys := make([]string, 0, 128)
 	c.ustubs.Range(func(key, value interface{}) bool {
 		ustub := value.(*UdpStub)
 		if time.Since(ustub.lastActvity) > udpTimeOut {
@@ -60,6 +69,8 @@ func (c *UdpCache) keepalive() {
 		}
 		c.ustubs.Delete(key)
 	}
+
+	c.lastKeepalive = time.Now()
 }
 
 func (c *UdpCache) key(src *net.UDPAddr) string {
