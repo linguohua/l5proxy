@@ -43,7 +43,7 @@ type Tunnel struct {
 	// reverseServ *UDPReverseServers
 }
 
-func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont string, reverseServ *ReverseServ) *Tunnel {
+func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont string, reverseServ *ReverseServ) (*Tunnel, error) {
 
 	t := &Tunnel{
 		id:          id,
@@ -74,7 +74,11 @@ func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint, endpiont s
 	}
 
 	reverseServ.onTunnelConnect(t)
-	return t
+	return t, nil
+}
+
+func (t *Tunnel) idx() int {
+	return t.id
 }
 
 func (t *Tunnel) rateLimitReset(quota uint) {

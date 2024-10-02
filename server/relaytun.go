@@ -18,12 +18,12 @@ type RelayTunnel struct {
 	writeLockRelay sync.Mutex
 }
 
-func newRelayTunnel(idx int, conn *websocket.Conn, endpoint string, account string, url2 string) *RelayTunnel {
+func newRelayTunnel(idx int, conn *websocket.Conn, endpoint string, account string, url2 string) (*RelayTunnel, error) {
 	uu := fmt.Sprintf("%s?endpoint=%s&uuid=%s&", url2, endpoint, account)
 	relayConn, _, err := websocket.DefaultDialer.Dial(uu, nil)
 	if err != nil {
-		log.Errorf("newRelayTunnel, dail to %s failed:%v", uu, err)
-		return nil
+
+		return nil, err
 	}
 
 	rt := &RelayTunnel{
@@ -53,7 +53,11 @@ func newRelayTunnel(idx int, conn *websocket.Conn, endpoint string, account stri
 		return nil
 	})
 
-	return rt
+	return rt, nil
+}
+
+func (t *RelayTunnel) idx() int {
+	return t.id
 }
 
 func (t *RelayTunnel) writeRelayPing(msg []byte) error {

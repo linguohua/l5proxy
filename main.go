@@ -100,11 +100,11 @@ func main() {
 		}
 	}
 
-	log.Infof("try to start  linproxy server, version:%s", getVersion())
+	log.Infof("try to start  l5proxy server, version:%s", getVersion())
 
 	// start http server
 	go server.CreateHTTPServer(listenAddr+":"+listenPort, wsPath, accountFilePath)
-	log.Info("start linproxy server ok!")
+	log.Info("start l5proxy server ok!")
 
 	if daemon == "yes" {
 		waitForSignal()

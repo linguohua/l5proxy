@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -19,6 +20,7 @@ type ITunnel interface {
 	serve()
 	keepalive()
 	rateLimitReset(uint)
+	idx() int
 }
 
 // Account account
@@ -32,7 +34,8 @@ type Account struct {
 
 	relayURL string
 
-	writeLock sync.Mutex
+	tunnelInBuilding int
+	writeLock        sync.Mutex
 }
 
 func newAccount(uc *AccountConfig) *Account {
@@ -45,35 +48,48 @@ func newAccount(uc *AccountConfig) *Account {
 	}
 }
 
+func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string) (ITunnel, error) {
+	a.writeLock.Lock()
+	a.tunnelInBuilding++
+	defer func() {
+		a.tunnelInBuilding--
+		a.writeLock.Unlock()
+	}()
+
+	if a.maxTunnel > 0 && uint(len(a.tunnels)+a.tunnelInBuilding) >= a.maxTunnel {
+		conn.Close()
+		return nil, fmt.Errorf("too many tunnels")
+	}
+
+	idx := a.tidx
+	a.tidx++
+
+	var tun ITunnel
+	var err error
+	if len(a.relayURL) > 0 {
+		// in relay-model
+		tun, err = newRelayTunnel(idx, conn, endpoint, a.uuid, a.relayURL)
+	} else {
+		tun, err = newTunnel(idx, conn, 200, a.rateLimit, endpoint, reverseServ)
+	}
+
+	return tun, err
+}
+
 func (a *Account) acceptWebsocket(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string) {
 	log.Infof("account:%s try to accept websocket, endpoint:%s", a.uuid, endpoint)
 
-	if a.maxTunnel > 0 && uint(len(a.tunnels)) >= a.maxTunnel {
-		conn.Close()
+	tun, err := a.buildTunnel(conn, reverseServ, endpoint)
+	if err != nil {
+		log.Errorf("account %s accept websocket failed cause create tunnel failed:%v", a.uuid, err)
 		return
 	}
 
-	a.writeLock.Lock()
-	idx := a.tidx
-	a.tidx++
-	a.writeLock.Unlock()
+	idx := tun.idx()
 
-	var tun ITunnel
-	if len(a.relayURL) > 0 {
-		// in relay-model
-		tun = newRelayTunnel(idx, conn, endpoint, a.uuid, a.relayURL)
-	} else {
-		tun = newTunnel(idx, conn, 200, a.rateLimit, endpoint, reverseServ)
-	}
-
-	if tun == nil {
-		return
-	}
-
-	// tun.reverseServ = a.reverseServ
 	a.writeLock.Lock()
 	a.tunnels[idx] = tun
-	log.Infof("account:%s accept websocket, total:%d", a.uuid, 1+len(a.tunnels))
+	log.Infof("account:%s accept websocket, total:%d", a.uuid, len(a.tunnels))
 	a.writeLock.Unlock()
 
 	defer func() {
