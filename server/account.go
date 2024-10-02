@@ -51,18 +51,21 @@ func newAccount(uc *AccountConfig) *Account {
 func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string) (ITunnel, error) {
 	a.writeLock.Lock()
 	a.tunnelInBuilding++
+	tunnelCount := uint(len(a.tunnels) + a.tunnelInBuilding)
+	idx := a.tidx
+	a.tidx++
+	a.writeLock.Unlock()
+
 	defer func() {
+		a.writeLock.Lock()
 		a.tunnelInBuilding--
 		a.writeLock.Unlock()
 	}()
 
-	if a.maxTunnel > 0 && uint(len(a.tunnels)+a.tunnelInBuilding) > a.maxTunnel {
+	if a.maxTunnel > 0 && tunnelCount > a.maxTunnel {
 		conn.Close()
 		return nil, fmt.Errorf("too many tunnels")
 	}
-
-	idx := a.tidx
-	a.tidx++
 
 	var tun ITunnel
 	var err error
