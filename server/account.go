@@ -1,6 +1,8 @@
 package server
 
 import (
+	"sync"
+
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 )
@@ -29,6 +31,8 @@ type Account struct {
 	maxTunnel uint
 
 	relayURL string
+
+	writeLock sync.Mutex
 }
 
 func newAccount(uc *AccountConfig) *Account {
@@ -42,15 +46,17 @@ func newAccount(uc *AccountConfig) *Account {
 }
 
 func (a *Account) acceptWebsocket(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string) {
-	log.Infof("account:%s accept websocket, total:%d", a.uuid, 1+len(a.tunnels))
+	log.Infof("account:%s try to accept websocket, endpoint:%s", a.uuid, endpoint)
 
 	if a.maxTunnel > 0 && uint(len(a.tunnels)) >= a.maxTunnel {
 		conn.Close()
 		return
 	}
 
+	a.writeLock.Lock()
 	idx := a.tidx
 	a.tidx++
+	a.writeLock.Unlock()
 
 	var tun ITunnel
 	if len(a.relayURL) > 0 {
@@ -65,13 +71,24 @@ func (a *Account) acceptWebsocket(conn *websocket.Conn, reverseServ *ReverseServ
 	}
 
 	// tun.reverseServ = a.reverseServ
+	a.writeLock.Lock()
 	a.tunnels[idx] = tun
-	defer delete(a.tunnels, idx)
+	log.Infof("account:%s accept websocket, total:%d", a.uuid, 1+len(a.tunnels))
+	a.writeLock.Unlock()
+
+	defer func() {
+		a.writeLock.Lock()
+		delete(a.tunnels, idx)
+		a.writeLock.Unlock()
+	}()
 
 	tun.serve()
 }
 
 func (a *Account) keepalive() {
+	a.writeLock.Lock()
+	defer a.writeLock.Unlock()
+
 	for _, t := range a.tunnels {
 		t.keepalive()
 	}
@@ -81,6 +98,9 @@ func (a *Account) rateLimitReset() {
 	if a.rateLimit < 1 {
 		return
 	}
+
+	a.writeLock.Lock()
+	defer a.writeLock.Unlock()
 
 	for _, t := range a.tunnels {
 		t.rateLimitReset(a.rateLimit)
