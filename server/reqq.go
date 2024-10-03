@@ -63,6 +63,9 @@ func (q *Reqq) free(idx uint16, tag uint16) error {
 		return fmt.Errorf("free, idx %d >= len %d", idx, uint16(len(q.array)))
 	}
 
+	q.l.Lock()
+	defer q.l.Unlock()
+
 	req := q.array[idx]
 	if !req.isUsed {
 		return fmt.Errorf("free, req %d:%d is in not used", idx, tag)
@@ -86,6 +89,9 @@ func (q *Reqq) get(idx uint16, tag uint16) (*Request, error) {
 		return nil, fmt.Errorf("get, idx %d >= len %d", idx, uint16(len(q.array)))
 	}
 
+	q.l.Lock()
+	defer q.l.Unlock()
+
 	req := q.array[idx]
 	if !req.isUsed {
 		return nil, fmt.Errorf("get, req %d:%d is not in used", idx, tag)
@@ -99,6 +105,9 @@ func (q *Reqq) get(idx uint16, tag uint16) (*Request, error) {
 }
 
 func (q *Reqq) cleanup() {
+	q.l.Lock()
+	defer q.l.Unlock()
+
 	for _, r := range q.array {
 		if r.isUsed {
 			q.free(r.idx, r.tag)
