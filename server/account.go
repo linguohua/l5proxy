@@ -8,18 +8,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// AccountConfig config
-type AccountConfig struct {
-	UUID      string `json:"uuid"`
-	RateLimit uint   `json:"rateLimit"` // 0: no limit
-	MaxTunnel uint   `json:"maxTunnel"`
-	RelayURL  string `json:"relayURL"`
-}
-
 type ITunnel interface {
 	serve()
 	keepalive()
-	rateLimitReset(uint)
+	rateLimitReset(int)
 	idx() int
 }
 
@@ -29,8 +21,8 @@ type Account struct {
 	tunnels map[int]ITunnel
 	tidx    int
 
-	rateLimit uint // 0: no limit
-	maxTunnel uint
+	rateLimit int // 0: no limit
+	maxTunnel int
 
 	relayURL string
 
@@ -38,7 +30,7 @@ type Account struct {
 	writeLock        sync.Mutex
 }
 
-func newAccount(uc *AccountConfig) *Account {
+func newAccount(uc *AccountTomlConfig) *Account {
 	return &Account{
 		uuid:      uc.UUID,
 		rateLimit: uc.RateLimit,
@@ -51,7 +43,7 @@ func newAccount(uc *AccountConfig) *Account {
 func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string) (ITunnel, error) {
 	a.writeLock.Lock()
 	a.tunnelInBuilding++
-	tunnelCount := uint(len(a.tunnels) + a.tunnelInBuilding)
+	tunnelCount := len(a.tunnels) + a.tunnelInBuilding
 	idx := a.tidx
 	a.tidx++
 	a.writeLock.Unlock()

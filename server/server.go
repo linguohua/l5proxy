@@ -1,11 +1,8 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -81,82 +78,39 @@ func keepalive() {
 	}
 }
 
-func setupBuiltinAccount(accountFilePath string) {
-	fileBytes, err := os.ReadFile(accountFilePath)
-	if err != nil {
-		log.Panicln("read account cfg file failed:", err)
-	}
-
-	// uuids := []*AccountConfig{
-	// 	{uuid: "ee80e87b-fc41-4e59-a722-7c3fee039cb4", rateLimit: 200 * 1024, maxTunnelCount: 3},
-	// 	{uuid: "f6000866-1b89-4ab4-b1ce-6b7625b8259a", rateLimit: 0, maxTunnelCount: 3}}
-	type jsonstruct struct {
-		Accounts []*AccountConfig `json:"accounts"`
-	}
-
-	var accountCfgs = &jsonstruct{}
-	err = json.Unmarshal(fileBytes, accountCfgs)
-	if err != nil {
-		log.Panicln("parse account cfg file failed:", err)
-	}
-
-	for _, a := range accountCfgs.Accounts {
+func setupBuiltinAccount(cfg *L5proxyConfig) {
+	for _, a := range cfg.Accounts {
 		accountMap[a.UUID] = newAccount(a)
 	}
 
-	log.Infof("load account ok, number of account:%d", len(accountCfgs.Accounts))
+	log.Infof("load account ok, number of account:%d", len(cfg.Accounts))
 }
 
-func setupAddressMap(addressMapFilePath string) (map[string]AddressMap, map[string]AddressMap) {
-	fileBytes, err := os.ReadFile(addressMapFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-
-		log.Panicf("read addressmap cfg file %s failed:%s", addressMapFilePath, err.Error())
-	}
-
-	type EndpointAdressMap struct {
-		Endpoint   string     `json:"endpoint"`
-		AddressMap AddressMap `json:"addressmap"`
-	}
-
-	type jsonstruct struct {
-		UDPAddressMaps []EndpointAdressMap `json:"udpmap"`
-		TCPAddressMaps []EndpointAdressMap `json:"tcpmap"`
-	}
-	var endpointAddressMaps = jsonstruct{}
-	err = json.Unmarshal(fileBytes, &endpointAddressMaps)
-	if err != nil {
-		log.Panicln("parse addressmap cfg file failed:", err)
-	}
+func setupAddressMap(cfg *L5proxyConfig) (map[string]AddressMap, map[string]AddressMap) {
 
 	tcpAddressMap := make(map[string]AddressMap)
-	for _, endpointAdressMap := range endpointAddressMaps.TCPAddressMaps {
+	for _, endpointAdressMap := range cfg.TcpPortMaps {
 		addressmap := tcpAddressMap[endpointAdressMap.Endpoint]
 		if addressmap == nil {
-			tcpAddressMap[endpointAdressMap.Endpoint] = endpointAdressMap.AddressMap
-			continue
+			addressmap = make(AddressMap)
 		}
 
-		for k, v := range endpointAdressMap.AddressMap {
-			addressmap[k] = v
+		for _, v := range endpointAdressMap.AddressMaps {
+			addressmap[v.External] = v.Internal
 		}
 
 		tcpAddressMap[endpointAdressMap.Endpoint] = addressmap
 	}
 
 	udpAddressMap := make(map[string]AddressMap)
-	for _, endpointAdressMap := range endpointAddressMaps.UDPAddressMaps {
+	for _, endpointAdressMap := range cfg.UdpPortMaps {
 		addressmap := udpAddressMap[endpointAdressMap.Endpoint]
 		if addressmap == nil {
-			udpAddressMap[endpointAdressMap.Endpoint] = endpointAdressMap.AddressMap
-			continue
+			addressmap = make(AddressMap)
 		}
 
-		for k, v := range endpointAdressMap.AddressMap {
-			addressmap[k] = v
+		for _, v := range endpointAdressMap.AddressMaps {
+			addressmap[v.External] = v.Internal
 		}
 
 		udpAddressMap[endpointAdressMap.Endpoint] = addressmap
@@ -165,9 +119,8 @@ func setupAddressMap(addressMapFilePath string) (map[string]AddressMap, map[stri
 	return tcpAddressMap, udpAddressMap
 }
 
-func setupReverseServAddressMap(dir string) {
-	path := path.Join(dir, "addressmap.json")
-	tcpAddressMaps, udpAddressMaps := setupAddressMap(path)
+func setupReverseServAddressMap(cfg *L5proxyConfig) {
+	tcpAddressMaps, udpAddressMaps := setupAddressMap(cfg)
 
 	reverseServ, err := NewReverseServ(tcpAddressMaps, udpAddressMaps)
 	if err != nil {
@@ -175,13 +128,12 @@ func setupReverseServAddressMap(dir string) {
 	}
 
 	reverseServer = reverseServ
-
 }
 
 // CreateHTTPServer start http server
-func CreateHTTPServer(listenAddr string, wsPath string, accountFilePath string) {
-	setupBuiltinAccount(accountFilePath)
-	setupReverseServAddressMap(path.Join(path.Dir(accountFilePath)))
+func CreateHTTPServer(cfg *L5proxyConfig) {
+	setupBuiltinAccount(cfg)
+	setupReverseServAddressMap(cfg)
 
 	var err error
 	dnsServerAddr, err = net.ResolveUDPAddr("udp", "8.8.8.8:53")
@@ -191,7 +143,7 @@ func CreateHTTPServer(listenAddr string, wsPath string, accountFilePath string) 
 
 	go keepalive()
 	http.HandleFunc("/", indexHandler)
-	http.HandleFunc(wsPath, wsHandler)
-	log.Infof("server listen at:%s, path:%s", listenAddr, wsPath)
-	log.Fatal(http.ListenAndServe(listenAddr, nil))
+	http.HandleFunc(cfg.Server.WebsocketPath, wsHandler)
+	log.Infof("server listen at:%s, path:%s", cfg.Server.Address, cfg.Server.WebsocketPath)
+	log.Fatal(http.ListenAndServe(cfg.Server.Address, nil))
 }

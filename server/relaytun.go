@@ -188,6 +188,6 @@ func (rt *RelayTunnel) keepalive() {
 	// nothing to do
 }
 
-func (rt *RelayTunnel) rateLimitReset(uint) {
+func (rt *RelayTunnel) rateLimitReset(int) {
 	// nothing to do
 }

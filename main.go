@@ -14,26 +14,12 @@ import (
 )
 
 var (
-	listenAddr      = ""
-	listenPort      = ""
-	wsPath          = ""
-	daemon          = ""
-	accountFilePath = ""
+	configFilePath  = ""
 	defaultLogLevel = log.InfoLevel
 )
 
-const (
-	defaultListenAddr = ""
-	defaultPath       = "/l5proxy"
-	defaultListenPort = "8050"
-)
-
 func init() {
-	flag.StringVar(&listenPort, "lp", defaultListenPort, "specify the listen port")
-	flag.StringVar(&listenAddr, "l", defaultListenAddr, "specify the listen address")
-	flag.StringVar(&accountFilePath, "c", "", "specify account file path")
-	flag.StringVar(&wsPath, "p", defaultPath, "specify websocket path")
-	flag.StringVar(&daemon, "d", "yes", "specify daemon mode")
+	flag.StringVar(&configFilePath, "c", "", "specify account file path")
 }
 
 // getVersion get version
@@ -41,10 +27,9 @@ func getVersion() string {
 	return "0.1.0"
 }
 
-func main() {
-	logLevel := os.Getenv("L5PROXY_LOG_LEVEL")
+func toLogLevel(logLevel string) log.Level {
+	ll := defaultLogLevel
 	if len(logLevel) > 0 {
-		log.Infof("use env L5PROXY_LOG_LEVEL:%s", logLevel)
 		switch strings.ToLower(logLevel) {
 		case "debug":
 			defaultLogLevel = log.DebugLevel
@@ -56,7 +41,14 @@ func main() {
 			defaultLogLevel = log.ErrorLevel
 		}
 	}
-	log.SetLevel(defaultLogLevel)
+
+	return ll
+}
+
+func main() {
+	logLevel := os.Getenv("L5PROXY_LOG_LEVEL")
+
+	log.SetLevel(toLogLevel(logLevel))
 
 	version := flag.Bool("v", false, "show version")
 	flag.Parse()
@@ -66,47 +58,40 @@ func main() {
 		os.Exit(0)
 	}
 
-	if listenPort == defaultListenPort {
-		eListenPort := os.Getenv("PORT")
-		if len(eListenPort) > 0 {
-			log.Infof("use env PORT instead of commandline:%s", eListenPort)
-			listenPort = eListenPort
-		}
-	}
-
-	if listenAddr == defaultListenAddr {
-		eListenAddr := os.Getenv("L5PROXY_GO_LADDR")
-		if len(eListenAddr) > 0 {
-			log.Infof("use env L5PROXY_GO_LADDR instead of commandline:%s", eListenAddr)
-			listenAddr = eListenAddr
-		}
-	}
-
-	if wsPath == defaultPath {
-		ePath := os.Getenv("L5PROXY_GO_PATH")
+	if configFilePath == "" {
+		ePath := os.Getenv("L5PROXY_CONFIG_PATH")
 		if len(ePath) > 0 {
-			log.Infof("use env L5PROXY_GO_PATH instead of commandline:%s", ePath)
-			wsPath = ePath
-		}
-	}
-
-	if accountFilePath == "" {
-		ePath := os.Getenv("L5PROXY_GO_ACCF_PATH")
-		if len(ePath) > 0 {
-			log.Infof("use env L5PROXY_GO_ACCF_PATH instead of commandline:%s", ePath)
-			accountFilePath = ePath
+			log.Infof("use env L5PROXY_CONFIG_PATH instead of commandline:%s", ePath)
+			configFilePath = ePath
 		} else {
-			log.Panic("please use -c to specify account file path of L5PROXY_GO_ACCF_PATH env")
+			log.Panic("please use -c to specify account file path or use L5PROXY_CONFIG_PATH env")
 		}
+	}
+
+	cfg, err := server.ParseConfig(configFilePath)
+	if err != nil {
+		log.Panicf("parse config file %s failed:%s", configFilePath, err)
+	}
+
+	if len(cfg.Server.LogLevel) > 0 {
+		log.SetLevel(toLogLevel(cfg.Server.LogLevel))
+	}
+
+	if len(cfg.Server.Address) == 0 {
+		cfg.Server.Address = ":8085"
+	}
+
+	if len(cfg.Server.WebsocketPath) == 0 {
+		cfg.Server.WebsocketPath = "/l5proxy"
 	}
 
 	log.Infof("try to start  l5proxy server, version:%s", getVersion())
 
 	// start http server
-	go server.CreateHTTPServer(listenAddr+":"+listenPort, wsPath, accountFilePath)
+	go server.CreateHTTPServer(cfg)
 	log.Info("start l5proxy server ok!")
 
-	if daemon == "yes" {
+	if cfg.Server.Daemon {
 		waitForSignal()
 	} else {
 		waitInput()

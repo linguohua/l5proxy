@@ -1,0 +1,32 @@
+[server]
+address = ":8050"
+websocket = "/l5proxy"
+daemon = true
+loglevel = "info"
+
+[[account]]
+uuid = "ee80e87b-fc41-4e59-a722-7c3fee039cb4"
+ratelimit = 204800
+maxtunnel = 3
+
+[[account]]
+uuid = "f6000866-1b89-4ab4-b1ce-6b7625b8259a"
+ratelimit = 0
+maxtunnel = 3
+
+[[account]]
+uuid = "8870f4a1-063f-43a4-bac2-679a443b3d08"
+ratelimit = 0
+maxtunnel = 3
+
+#[[udpmap]]
+#endpoint = "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49"
+#addressmap = [{external = "192.168.0.154:5000", internal = "192.168.0.154:5000"}]
+
+#[[tcpmap]]
+#endpoint = "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49"
+#addressmap = [{external = "192.168.0.154:5000", internal = "192.168.0.154:5000"}]
+
+#[[tcpmap]]
+#endpoint = "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49"
+#addressmap = [{external = "192.168.0.154:4000", internal = "192.168.0.154:4000"}]

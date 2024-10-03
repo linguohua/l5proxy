@@ -33,8 +33,8 @@ type Tunnel struct {
 	writeLock sync.Mutex
 	waitping  int
 
-	rateLimit   uint
-	rateQuota   uint
+	rateLimit   int
+	rateQuota   int
 	rateChan    chan []byte
 	rateWg      *sync.WaitGroup
 	udpCache    *UdpCache
@@ -43,7 +43,7 @@ type Tunnel struct {
 	// reverseServ *UDPReverseServers
 }
 
-func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit uint,
+func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit int,
 	endpiont string, reverseServ *ReverseServ) (*Tunnel, error) {
 	t := &Tunnel{
 		id:          id,
@@ -81,7 +81,7 @@ func (t *Tunnel) idx() int {
 	return t.id
 }
 
-func (t *Tunnel) rateLimitReset(quota uint) {
+func (t *Tunnel) rateLimitReset(quota int) {
 	t.rateQuota = quota
 
 	if t.rateWg != nil {
@@ -90,7 +90,7 @@ func (t *Tunnel) rateLimitReset(quota uint) {
 	}
 }
 
-func (t *Tunnel) waitQuota(q uint) {
+func (t *Tunnel) waitQuota(q int) {
 	if t.rateQuota < q {
 		t.rateQuota = 0
 
@@ -111,7 +111,7 @@ func (t *Tunnel) drainRateChan() {
 			leN := len(buf)
 			t.write(buf)
 
-			t.waitQuota(uint(leN))
+			t.waitQuota(leN)
 		} else {
 			break
 		}
