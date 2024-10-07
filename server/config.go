@@ -50,5 +50,22 @@ func ParseConfig(filePath string) (*L5proxyConfig, error) {
 		return nil, err
 	}
 
+	if config.Server.Address == "" {
+		return nil, fmt.Errorf("must provide address to listen")
+	}
+
+	if config.Server.WebsocketPath == "" {
+		return nil, fmt.Errorf("must provide a websocket URL path")
+	}
+
+	for _, a := range config.Accounts {
+		if a.MaxTunnel < 1 {
+			a.MaxTunnel = 3
+		}
+
+		if a.UUID == "" {
+			return nil, fmt.Errorf("account must provide an UUID")
+		}
+	}
 	return &config, nil
 }

@@ -1,7 +1,11 @@
 [server]
+# address: 服务器的监听地址，以":"分割IP和端口
 address = ":8050"
+# websocket: websocket的Path
 websocket = "/l5proxy"
+# daemon: 是否以daemon的方式运行，建议用默认值即可，默认值是false
 daemon = true
+# loglevel: 日志级别，默认值是INFO
 loglevel = "info"
 
 [[account]]
@@ -15,9 +19,14 @@ ratelimit = 0
 maxtunnel = 3
 
 [[account]]
+# uuid: 允许接入的账号
 uuid = "8870f4a1-063f-43a4-bac2-679a443b3d08"
+# ratelimit: 速率限制，默认是0，表示不限制，建议默认值即可
 ratelimit = 0
+# maxtunnel: 该账号最大允许接入的隧道数量，默认是3
 maxtunnel = 3
+# relay: 下一跳L5Proxy的URL，如果不设置，L5Proxy把数据包直接发给目标地址，如果设置，则发给下一跳L5Proxy
+#relay = "wss://boy.llwant.com/lFDBu0WTbYuClhPzXEFHyE3UWTicYU7dq9zhPLf5kqrDjOW2schlH2W5w8ZxQBV8"
 
 #[[udpmap]]
 #endpoint = "e061ec9e-6d0b-11ef-bc98-dbd10ae6ce49"
