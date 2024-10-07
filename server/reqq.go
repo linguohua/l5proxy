@@ -66,6 +66,12 @@ func (q *Reqq) free(idx uint16, tag uint16) error {
 	q.l.Lock()
 	defer q.l.Unlock()
 
+	return q.freeInternal(idx, tag)
+}
+
+func (q *Reqq) freeInternal(idx uint16, tag uint16) error {
+	// log.Infof("reqq free req %d:%d", idx, tag)
+
 	req := q.array[idx]
 	if !req.isUsed {
 		return fmt.Errorf("free, req %d:%d is in not used", idx, tag)
@@ -74,8 +80,6 @@ func (q *Reqq) free(idx uint16, tag uint16) error {
 	if req.tag != tag {
 		return fmt.Errorf("free, req %d:%d is in not match tag %d", idx, tag, req.tag)
 	}
-
-	// log.Infof("reqq free req %d:%d", idx, tag)
 
 	req.dofree()
 	req.tag++
@@ -110,7 +114,7 @@ func (q *Reqq) cleanup() {
 
 	for _, r := range q.array {
 		if r.isUsed {
-			q.free(r.idx, r.tag)
+			q.freeInternal(r.idx, r.tag)
 		}
 	}
 }
