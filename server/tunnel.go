@@ -181,9 +181,12 @@ func (t *Tunnel) onPong(_ []byte) {
 }
 
 func (t *Tunnel) onClose() {
-	if t.rateLimit > 0 {
+	if t.rateLimit > 0 && t.rateChan != nil {
+		t.writeLock.Lock()
 		t.rateLimit = 0
 		close(t.rateChan)
+		t.rateChan = nil
+		t.writeLock.Unlock()
 	}
 
 	t.reqq.cleanup()
@@ -336,7 +339,11 @@ func (t *Tunnel) onRequestData(req *Request, data []byte) {
 	copy(buf[5:], data)
 
 	if t.rateLimit > 0 {
-		t.rateChan <- buf
+		t.writeLock.Lock() // lock to prevent write to a closed channel
+		if t.rateChan != nil {
+			t.rateChan <- buf
+		}
+		t.writeLock.Unlock()
 	} else {
 		t.write(buf)
 	}
