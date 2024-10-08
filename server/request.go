@@ -84,7 +84,11 @@ func (r *Request) proxy() {
 			break
 		}
 
-		r.t.onRequestData(r, buf[:n])
+		err = r.t.onRequestData(r, buf[:n])
+		if err != nil {
+			log.Errorf("proxy read, tunnel error: %s", err)
+			break
+		}
 	}
 }
 

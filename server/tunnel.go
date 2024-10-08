@@ -33,10 +33,13 @@ type Tunnel struct {
 	writeLock sync.Mutex
 	waitping  int
 
-	rateLimit   int
-	rateQuota   int
-	rateChan    chan []byte
-	rateWg      *sync.WaitGroup
+	rateLimit int
+	rateQuota int
+
+	rateChanLock sync.Mutex
+	rateChan     chan []byte
+	rateWg       *sync.WaitGroup
+
 	udpCache    *UdpCache
 	endpoint    string
 	reverseServ *ReverseServ
@@ -94,10 +97,19 @@ func (t *Tunnel) waitQuota(q int) {
 	if t.rateQuota < q {
 		t.rateQuota = 0
 
+		t.rateChanLock.Lock()
+		if t.rateChan == nil {
+			t.rateChanLock.Unlock()
+			return
+		}
+
 		// wait
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		t.rateWg = &wg
+
+		t.rateChanLock.Unlock()
+
 		wg.Wait()
 	} else {
 		t.rateQuota = t.rateQuota - q
@@ -106,10 +118,20 @@ func (t *Tunnel) waitQuota(q int) {
 
 func (t *Tunnel) drainRateChan() {
 	for {
-		buf := <-t.rateChan
+		buf, ok := <-t.rateChan
+
+		if !ok {
+			// channel has been closed
+			break
+		}
+
 		if buf != nil {
 			leN := len(buf)
-			t.write(buf)
+			err := t.write(buf)
+
+			if err != nil {
+				break
+			}
 
 			t.waitQuota(leN)
 		} else {
@@ -169,11 +191,13 @@ func (t *Tunnel) writePong(msg []byte) {
 	t.writeLock.Unlock()
 }
 
-func (t *Tunnel) write(msg []byte) {
+func (t *Tunnel) write(msg []byte) error {
 	t.writeLock.Lock()
 	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
-	t.conn.WriteMessage(websocket.BinaryMessage, msg)
+	err := t.conn.WriteMessage(websocket.BinaryMessage, msg)
 	t.writeLock.Unlock()
+
+	return err
 }
 
 func (t *Tunnel) onPong(_ []byte) {
@@ -182,11 +206,16 @@ func (t *Tunnel) onPong(_ []byte) {
 
 func (t *Tunnel) onClose() {
 	if t.rateLimit > 0 && t.rateChan != nil {
-		t.writeLock.Lock()
+		t.rateChanLock.Lock()
 		t.rateLimit = 0
 		close(t.rateChan)
 		t.rateChan = nil
-		t.writeLock.Unlock()
+
+		if t.rateWg != nil {
+			t.rateWg.Done()
+		}
+
+		t.rateChanLock.Unlock()
 	}
 
 	t.reqq.cleanup()
@@ -331,7 +360,28 @@ func (t *Tunnel) onRequestHalfClosed(req *Request) {
 	t.write(buf)
 }
 
-func (t *Tunnel) onRequestData(req *Request, data []byte) {
+func (t *Tunnel) safeWriteRateChan(data []byte) error {
+	t.rateChanLock.Lock() // lock to prevent write to a closed channel
+	ch := t.rateChan
+	t.rateChanLock.Unlock()
+
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = fmt.Errorf("tunnel has closed")
+		}
+	}()
+
+	if ch != nil {
+		ch <- data
+	} else {
+		err = fmt.Errorf("tunnel has closed")
+	}
+
+	return err
+}
+
+func (t *Tunnel) onRequestData(req *Request, data []byte) error {
 	buf := make([]byte, 5+len(data))
 	buf[0] = cMDReqData
 	binary.LittleEndian.PutUint16(buf[1:], req.idx)
@@ -339,13 +389,9 @@ func (t *Tunnel) onRequestData(req *Request, data []byte) {
 	copy(buf[5:], data)
 
 	if t.rateLimit > 0 {
-		t.writeLock.Lock() // lock to prevent write to a closed channel
-		if t.rateChan != nil {
-			t.rateChan <- buf
-		}
-		t.writeLock.Unlock()
+		return t.safeWriteRateChan(buf)
 	} else {
-		t.write(buf)
+		return t.write(buf)
 	}
 }
 
@@ -406,7 +452,7 @@ func (t *Tunnel) onServerUDPData(data []byte, src *net.UDPAddr, dst *net.UDPAddr
 	copy(buf[1+len(srcAddrBuf):], destAddrBuf)
 	copy(buf[1+len(srcAddrBuf)+len(destAddrBuf):], data)
 
-	t.write(buf)
+	_ = t.write(buf)
 }
 
 func parseAddress(msg []byte) *net.UDPAddr {
@@ -517,5 +563,5 @@ func (t *Tunnel) onClientCreate(src, dst *net.TCPAddr, idx, tag uint16) {
 	copy(buf[5:], srcAddrBuf)
 	copy(buf[5+len(srcAddrBuf):], destAddrBuf)
 
-	t.write(buf)
+	_ = t.write(buf)
 }
