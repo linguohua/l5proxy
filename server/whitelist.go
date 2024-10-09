@@ -49,6 +49,11 @@ func generateWhitelist() error {
 			}
 
 			domain := strings.TrimSpace(string(linebytes))
+			if len(domain) > 0 && domain[0] == '#' {
+				// skip comments
+				continue
+			}
+
 			xxx := strings.Split(domain, "/")
 			if len(xxx) != 3 {
 				log.Errorf("generate whitelist error, %s not expected format", domain)
