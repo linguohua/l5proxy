@@ -144,6 +144,7 @@ func CreateHTTPServer(cfg *L5proxyConfig) {
 	go keepalive()
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc(cfg.Server.WebsocketPath, wsHandler)
+	http.HandleFunc(cfg.Server.WebsocketPath+"/whitelist", whitelistHandler)
 	log.Infof("server listen at:%s, path:%s", cfg.Server.Address, cfg.Server.WebsocketPath)
 	log.Fatal(http.ListenAndServe(cfg.Server.Address, nil))
 }
