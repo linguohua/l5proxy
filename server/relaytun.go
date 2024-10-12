@@ -127,14 +127,14 @@ func (rt *RelayTunnel) serve() {
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
-			log.Errorf("Tunnel read failed:%s", err)
+			log.Errorf("Relay tunnel %d [north] read failed:%s", rt.id, err)
 			break
 		}
 
 		// log.Infof("Tunnel recv message, len:%d", len(message))
 		err = rt.onTunnelMessage(message)
 		if err != nil {
-			log.Errorf("Tunnel onTunnelMessage failed:%s", err)
+			log.Errorf("Relay tunnel %d [south] onTunnelMessage failed:%s", rt.id, err)
 			break
 		}
 	}
@@ -147,14 +147,14 @@ func (rt *RelayTunnel) serveRelay() {
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
-			log.Errorf("Tunnel read failed:%s", err)
+			log.Errorf("Relay tunnel %d [north] read failed:%s", rt.id, err)
 			break
 		}
 
 		// log.Infof("Tunnel recv message, len:%d", len(message))
 		err = rt.onTunnelMessageRelay(message)
 		if err != nil {
-			log.Errorf("Tunnel onTunnelMessage failed:%s", err)
+			log.Errorf("Relay tunnel %d [north] onTunnelMessage failed:%s", rt.id, err)
 			break
 		}
 	}
@@ -164,12 +164,14 @@ func (rt *RelayTunnel) serveRelay() {
 
 func (rt *RelayTunnel) onClose() {
 	rt.writeLockRelay.Lock()
+	log.Infof("Relay tunnel %d south closed, now north south", rt.id)
 	rt.connRelay.Close()
 	rt.writeLockRelay.Unlock()
 }
 
 func (rt *RelayTunnel) onCloseRelay() {
 	rt.writeLock.Lock()
+	log.Infof("Relay tunnel %d north closed, now close south", rt.id)
 	rt.conn.Close()
 	rt.writeLock.Unlock()
 }
