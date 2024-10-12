@@ -127,14 +127,14 @@ func (rt *RelayTunnel) serve() {
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
-			log.Errorf("Relay tunnel %d [south] read failed:%s", rt.id, err)
+			log.Errorf("Relay tunnel %d [south %s] read failed:%s", rt.id, c.RemoteAddr().String(), err)
 			break
 		}
 
 		// log.Infof("Tunnel recv message, len:%d", len(message))
 		err = rt.onTunnelMessage(message)
 		if err != nil {
-			log.Errorf("Relay tunnel %d [south] onTunnelMessage failed:%s", rt.id, err)
+			log.Errorf("Relay tunnel %d [south %s] onTunnelMessage failed:%s", rt.id, c.RemoteAddr().String(), err)
 			break
 		}
 	}
@@ -147,14 +147,14 @@ func (rt *RelayTunnel) serveRelay() {
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
-			log.Errorf("Relay tunnel %d [north] read failed:%s", rt.id, err)
+			log.Errorf("Relay tunnel %d [north %s] read failed:%s", rt.id, c.RemoteAddr().String(), err)
 			break
 		}
 
 		// log.Infof("Tunnel recv message, len:%d", len(message))
 		err = rt.onTunnelMessageRelay(message)
 		if err != nil {
-			log.Errorf("Relay tunnel %d [north] onTunnelMessage failed:%s", rt.id, err)
+			log.Errorf("Relay tunnel %d [north %s] onTunnelMessage failed:%s", rt.id, c.RemoteAddr().String(), err)
 			break
 		}
 	}
