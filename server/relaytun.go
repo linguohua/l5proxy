@@ -127,7 +127,7 @@ func (rt *RelayTunnel) serve() {
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
-			log.Errorf("Relay tunnel %d [north] read failed:%s", rt.id, err)
+			log.Errorf("Relay tunnel %d [south] read failed:%s", rt.id, err)
 			break
 		}
 
@@ -164,7 +164,7 @@ func (rt *RelayTunnel) serveRelay() {
 
 func (rt *RelayTunnel) onClose() {
 	rt.writeLockRelay.Lock()
-	log.Infof("Relay tunnel %d south closed, now north south", rt.id)
+	log.Infof("Relay tunnel %d south closed, now close north", rt.id)
 	rt.connRelay.Close()
 	rt.writeLockRelay.Unlock()
 }
