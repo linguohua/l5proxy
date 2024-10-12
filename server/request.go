@@ -11,6 +11,15 @@ const (
 	tcpSocketWriteDeadline = 5
 )
 
+type ProxyContext struct {
+	Addr          string
+	DialTime      time.Duration
+	FirstByteTime time.Duration
+	ServiceTime   time.Duration
+
+	Bytes int64
+}
+
 // Request request
 type Request struct {
 	isUsed bool
@@ -52,7 +61,12 @@ func (r *Request) onClientData(data []byte) {
 	}
 }
 
-func (r *Request) proxy() {
+func (r *Request) proxy(ctx *ProxyContext) {
+	defer func() {
+		log.Infof("proxy to %s, dial:%s, first byte:%s, service duration:%s, bytes:%d",
+			ctx.Addr, ctx.DialTime, ctx.FirstByteTime, ctx.ServiceTime, ctx.Bytes)
+	}()
+
 	c := r.conn
 	if c == nil {
 		return
@@ -62,6 +76,8 @@ func (r *Request) proxy() {
 		return
 	}
 
+	now := time.Now()
+	firstByteMark := false
 	buf := make([]byte, 4096)
 	for {
 		n, err := c.Read(buf)
@@ -84,12 +100,21 @@ func (r *Request) proxy() {
 			break
 		}
 
+		if !firstByteMark {
+			firstByteMark = true
+			ctx.FirstByteTime = time.Since(now)
+		}
+
+		ctx.Bytes = ctx.Bytes + int64(n)
+
 		err = r.t.onRequestData(r, buf[:n])
 		if err != nil {
-			log.Errorf("proxy read, tunnel error: %s", err)
+			log.Errorf("proxy read, tunnel onRequestData error: %s", err)
 			break
 		}
 	}
+
+	ctx.ServiceTime = time.Since(now)
 }
 
 func writeAll(buf []byte, nc net.Conn) error {

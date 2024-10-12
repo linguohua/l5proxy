@@ -167,6 +167,7 @@ func (t *Tunnel) serve() {
 
 func (t *Tunnel) keepalive() {
 	if t.waitping > 3 {
+		log.Errorf("Tunnel keepalive failed")
 		t.conn.Close()
 		return
 	}
@@ -226,6 +227,8 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 	if len(message) < 5 {
 		return fmt.Errorf("invalid tunnel message")
 	}
+
+	t.waitping = 0
 
 	cmd := message[0]
 	if cmd == cMDDNSReq {
@@ -295,8 +298,8 @@ func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", domain, port)
-	log.Infof("proxy to:%s", addr)
 
+	now := time.Now()
 	ts := time.Second * 2
 	c, err := net.DialTimeout("tcp", addr, ts)
 	if err != nil {
@@ -305,9 +308,13 @@ func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
 		return
 	}
 
+	cxt := &ProxyContext{
+		Addr:     addr,
+		DialTime: time.Since(now),
+	}
 	req.conn = c.(*net.TCPConn)
 
-	go req.proxy()
+	go req.proxy(cxt)
 }
 
 func (t *Tunnel) handleRequestData(idx uint16, tag uint16, message []byte) {
@@ -543,7 +550,10 @@ func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
 	t.onClientCreate(src, dst, req.idx, req.tag)
 
 	// start a new goroutine to read data from 'conn'
-	go req.proxy()
+	ctx := &ProxyContext{
+		Addr: dst.String(),
+	}
+	go req.proxy(ctx)
 
 	return nil
 }
