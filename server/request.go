@@ -64,7 +64,11 @@ func (r *Request) onClientData(data []byte) {
 func (r *Request) proxy(ctx *ProxyContext) {
 	defer func() {
 		log.Infof("proxy to %s, dial:%s, first byte:%s, service duration:%s, bytes:%d",
-			ctx.Addr, ctx.DialTime, ctx.FirstByteTime, ctx.ServiceTime, ctx.Bytes)
+			ctx.Addr,
+			ctx.DialTime.Round(time.Millisecond),
+			ctx.FirstByteTime.Round(time.Millisecond),
+			ctx.ServiceTime.Round(time.Millisecond),
+			ctx.Bytes)
 	}()
 
 	c := r.conn
