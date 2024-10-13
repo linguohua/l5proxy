@@ -66,14 +66,15 @@ func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, en
 	var tun ITunnel
 	var err error
 	cc := &TunnelCreateCtx{
-		id:          idx,
-		conn:        conn,
-		endpoint:    endpoint,
-		account:     a.uuid,
-		relayURL:    a.relayURL,
-		rateLimit:   a.rateLimit,
-		reverseServ: reverseServ,
-		cap:         200,
+		id:            idx,
+		conn:          conn,
+		endpoint:      endpoint,
+		account:       a.uuid,
+		relayURL:      a.relayURL,
+		rateLimit:     a.rateLimit,
+		reverseServ:   reverseServ,
+		cap:           200,
+		withTimestamp: a.withTimestamp,
 	}
 
 	if len(a.relayURL) > 0 {
