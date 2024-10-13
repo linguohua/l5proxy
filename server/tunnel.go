@@ -393,7 +393,7 @@ func (t *Tunnel) dumpTimestamp(req *Request, msg []byte) {
 		}
 
 		offset = offset + 2
-		sb.WriteString(fmt.Sprintf("%d", ts))
+		sb.WriteString(fmt.Sprintf("%d,", ts))
 	}
 
 	sb.WriteString(fmt.Sprintf("%d", unixMilliNow-int64(unixMilli)))
