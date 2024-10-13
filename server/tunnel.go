@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +23,22 @@ const (
 	cMDDNSReq            = 7
 	cMDDNSRsp            = 8
 	cMDUDPReq            = 9
+	cMDReqDataExt        = 10
 )
+
+type TunnelCreateCtx struct {
+	account     string
+	id          int
+	conn        *websocket.Conn
+	cap         int
+	rateLimit   int
+	endpoint    string
+	reverseServ *ReverseServ
+
+	withTimestamp bool
+
+	relayURL string
+}
 
 // Tunnel tunnel
 type Tunnel struct {
@@ -44,39 +60,41 @@ type Tunnel struct {
 	endpoint    string
 	reverseServ *ReverseServ
 	// reverseServ *UDPReverseServers
+
+	withTimestamp bool
 }
 
-func newTunnel(id int, conn *websocket.Conn, cap int, rateLimit int,
-	endpiont string, reverseServ *ReverseServ) (*Tunnel, error) {
+func newTunnel(cc *TunnelCreateCtx) (*Tunnel, error) {
 	t := &Tunnel{
-		id:          id,
-		conn:        conn,
-		rateLimit:   rateLimit,
-		rateQuota:   rateLimit,
-		udpCache:    newUdpCache(),
-		endpoint:    endpiont,
-		reverseServ: reverseServ,
+		id:            cc.id,
+		conn:          cc.conn,
+		rateLimit:     cc.rateLimit,
+		rateQuota:     cc.rateLimit,
+		udpCache:      newUdpCache(),
+		endpoint:      cc.endpoint,
+		reverseServ:   cc.reverseServ,
+		withTimestamp: cc.withTimestamp,
 	}
 
-	reqq := newReqq(cap, t)
+	reqq := newReqq(cc.cap, t)
 	t.reqq = reqq
 
-	conn.SetPingHandler(func(data string) error {
+	cc.conn.SetPingHandler(func(data string) error {
 		t.writePong([]byte(data))
 		return nil
 	})
 
-	conn.SetPongHandler(func(data string) error {
+	cc.conn.SetPongHandler(func(data string) error {
 		t.onPong([]byte(data))
 		return nil
 	})
 
-	if rateLimit > 0 {
+	if cc.rateLimit > 0 {
 		// 100 item
 		t.rateChan = make(chan []byte, 100)
 	}
 
-	reverseServ.onTunnelConnect(t)
+	cc.reverseServ.onTunnelConnect(t)
 	return t, nil
 }
 
@@ -247,13 +265,15 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 
 	switch cmd {
 	case cMDReqCreated:
-		t.handleRequestCreate(idx, tag, message[5:])
+		t.handleClientReqCreate(idx, tag, message[5:])
 	case cMDReqData:
-		t.handleRequestData(idx, tag, message[5:])
+		t.handleClientReqData(idx, tag, message[5:])
+	case cMDReqDataExt:
+		t.handleClientReqDataExt(idx, tag, message[5:])
 	case cMDReqClientFinished:
-		t.handleRequestFinished(idx, tag)
+		t.handleClientReqFinished(idx, tag)
 	case cMDReqClientClosed:
-		t.handleRequestClosed(idx, tag)
+		t.handleClientReqClosed(idx, tag)
 
 	default:
 		log.Infof("onTunnelMessage, unsupport tunnel cmd:%d", cmd)
@@ -262,7 +282,7 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 	return nil
 }
 
-func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
+func (t *Tunnel) handleClientReqCreate(idx uint16, tag uint16, message []byte) {
 	addressType := message[0]
 	var port uint16
 	var domain string
@@ -304,20 +324,22 @@ func (t *Tunnel) handleRequestCreate(idx uint16, tag uint16, message []byte) {
 	c, err := net.DialTimeout("tcp", addr, ts)
 	if err != nil {
 		log.Errorf("proxy DialTCP failed: %s", err)
-		t.onRequestTerminate(req)
+		t.onServerReqTerminate(req)
 		return
 	}
 
 	cxt := &ProxyContext{
-		Addr:     addr,
+		To:       addr,
 		DialTime: time.Since(now),
 	}
-	req.conn = c.(*net.TCPConn)
 
-	go req.proxy(cxt)
+	req.conn = c.(*net.TCPConn)
+	req.ctx = cxt
+
+	go req.proxy()
 }
 
-func (t *Tunnel) handleRequestData(idx uint16, tag uint16, message []byte) {
+func (t *Tunnel) handleClientReqData(idx uint16, tag uint16, message []byte) {
 	req, err := t.reqq.get(idx, tag)
 	if err != nil {
 		log.Errorf("handleRequestData, get req failed:%s", err)
@@ -327,7 +349,59 @@ func (t *Tunnel) handleRequestData(idx uint16, tag uint16, message []byte) {
 	req.onClientData(message)
 }
 
-func (t *Tunnel) handleRequestFinished(idx uint16, tag uint16) {
+func (t *Tunnel) handleClientReqDataExt(idx, tag uint16, msg []byte) {
+	req, err := t.reqq.get(idx, tag)
+	if err != nil {
+		log.Debugf("handleClientReqDataExt error:%v", err)
+		return
+	}
+
+	t.dumpTimestamp(req, msg)
+
+	cut := len(msg) - (8 + 4*2)
+	req.onClientData(msg[0:cut])
+}
+
+func (t *Tunnel) dumpTimestamp(req *Request, msg []byte) {
+	ctx := req.ctx
+	if ctx == nil {
+		return
+	}
+
+	extraBytesLen := 8 + 4*2
+	size := len(msg)
+
+	if size <= extraBytesLen {
+		log.Errorf("tunnel %d dumpTimestamp failed, size %d not enough", t.id, size)
+		return
+	}
+
+	offset := size - extraBytesLen
+	unixMilli := binary.LittleEndian.Uint64(msg[offset:])
+	offset = offset + 8
+
+	unixMilliNow := time.Now().UnixMilli()
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Tunnel[%d] [%s]-->[%s],size:%d, timestamps[ms]:", t.id,
+		t.endpoint, ctx.To, size-extraBytesLen))
+
+	for i := 0; i < 4; i++ {
+		ts := binary.LittleEndian.Uint16(msg[offset:])
+		if ts == 0 {
+			break
+		}
+
+		offset = offset + 2
+		sb.WriteString(fmt.Sprintf("%d", ts))
+	}
+
+	sb.WriteString(fmt.Sprintf("%d", unixMilliNow-int64(unixMilli)))
+
+	log.Infof(sb.String())
+}
+
+func (t *Tunnel) handleClientReqFinished(idx uint16, tag uint16) {
 	req, err := t.reqq.get(idx, tag)
 	if err != nil {
 		//log.Errorf("handleRequestData, get req failed:%s", err)
@@ -337,7 +411,7 @@ func (t *Tunnel) handleRequestFinished(idx uint16, tag uint16) {
 	req.onClientFinished()
 }
 
-func (t *Tunnel) handleRequestClosed(idx uint16, tag uint16) {
+func (t *Tunnel) handleClientReqClosed(idx uint16, tag uint16) {
 	err := t.reqq.free(idx, tag)
 	if err != nil {
 		//log.Errorf("handleRequestClosed, get req failed:%s", err)
@@ -345,7 +419,7 @@ func (t *Tunnel) handleRequestClosed(idx uint16, tag uint16) {
 	}
 }
 
-func (t *Tunnel) onRequestTerminate(req *Request) {
+func (t *Tunnel) onServerReqTerminate(req *Request) {
 	// send close to client
 	buf := make([]byte, 5)
 	buf[0] = cMDReqServerClosed
@@ -354,7 +428,7 @@ func (t *Tunnel) onRequestTerminate(req *Request) {
 
 	t.write(buf)
 
-	t.handleRequestClosed(req.idx, req.tag)
+	t.handleClientReqClosed(req.idx, req.tag)
 }
 
 func (t *Tunnel) onRequestHalfClosed(req *Request) {
@@ -388,12 +462,30 @@ func (t *Tunnel) safeWriteRateChan(data []byte) error {
 	return err
 }
 
-func (t *Tunnel) onRequestData(req *Request, data []byte) error {
-	buf := make([]byte, 5+len(data))
-	buf[0] = cMDReqData
+func (t *Tunnel) onServerReqData(req *Request, data []byte) error {
+	extraBytesLen := 0
+	if t.withTimestamp {
+		extraBytesLen = 8 + 4*2
+	}
+
+	cmdAndDataLen := 5 + len(data)
+
+	buf := make([]byte, cmdAndDataLen+extraBytesLen)
+
+	if t.withTimestamp {
+		buf[0] = cMDReqDataExt
+	} else {
+		buf[0] = cMDReqData
+	}
+
 	binary.LittleEndian.PutUint16(buf[1:], req.idx)
 	binary.LittleEndian.PutUint16(buf[3:], req.tag)
 	copy(buf[5:], data)
+	if t.withTimestamp {
+		// write timestamp
+		timestamp := uint64(time.Now().UnixMilli())
+		binary.LittleEndian.PutUint64(buf[cmdAndDataLen:], timestamp)
+	}
 
 	if t.rateLimit > 0 {
 		return t.safeWriteRateChan(buf)
@@ -551,9 +643,10 @@ func (t *Tunnel) acceptTCPConn(conn net.Conn, src *net.TCPAddr) error {
 
 	// start a new goroutine to read data from 'conn'
 	ctx := &ProxyContext{
-		Addr: dst.String(),
+		To: dst.String(),
 	}
-	go req.proxy(ctx)
+	req.ctx = ctx
+	go req.proxy()
 
 	return nil
 }

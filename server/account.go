@@ -28,6 +28,8 @@ type Account struct {
 
 	tunnelInBuilding int
 	writeLock        sync.Mutex
+
+	withTimestamp bool
 }
 
 func newAccount(uc *AccountTomlConfig) *Account {
@@ -37,6 +39,8 @@ func newAccount(uc *AccountTomlConfig) *Account {
 		maxTunnel: uc.MaxTunnel,
 		relayURL:  uc.RelayURL,
 		tunnels:   make(map[int]ITunnel),
+
+		withTimestamp: uc.WithTimestamp,
 	}
 }
 
@@ -61,11 +65,22 @@ func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, en
 
 	var tun ITunnel
 	var err error
+	cc := &TunnelCreateCtx{
+		id:          idx,
+		conn:        conn,
+		endpoint:    endpoint,
+		account:     a.uuid,
+		relayURL:    a.relayURL,
+		rateLimit:   a.rateLimit,
+		reverseServ: reverseServ,
+		cap:         200,
+	}
+
 	if len(a.relayURL) > 0 {
 		// in relay-model
-		tun, err = newRelayTunnel(idx, conn, endpoint, a.uuid, a.relayURL)
+		tun, err = newRelayTunnel(cc)
 	} else {
-		tun, err = newTunnel(idx, conn, 200, a.rateLimit, endpoint, reverseServ)
+		tun, err = newTunnel(cc)
 	}
 
 	return tun, err

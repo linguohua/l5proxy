@@ -26,6 +26,8 @@ type AccountTomlConfig struct {
 	RateLimit int    `toml:"ratelimit"`
 	MaxTunnel int    `toml:"maxtunnel"`
 	RelayURL  string `toml:"relay"`
+
+	WithTimestamp bool `toml:"timestamp"`
 }
 
 type PortMapTomlConfig struct {

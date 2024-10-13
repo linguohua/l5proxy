@@ -12,7 +12,7 @@ const (
 )
 
 type ProxyContext struct {
-	Addr          string
+	To            string
 	DialTime      time.Duration
 	FirstByteTime time.Duration
 	ServiceTime   time.Duration
@@ -28,6 +28,8 @@ type Request struct {
 	t      *Tunnel
 
 	conn *net.TCPConn
+
+	ctx *ProxyContext
 }
 
 func newRequest(t *Tunnel, idx uint16) *Request {
@@ -61,10 +63,12 @@ func (r *Request) onClientData(data []byte) {
 	}
 }
 
-func (r *Request) proxy(ctx *ProxyContext) {
+func (r *Request) proxy() {
+	ctx := r.ctx
+
 	defer func() {
 		log.Infof("proxy to %s, dial:%s, first byte:%s, service duration:%s, bytes:%d",
-			ctx.Addr,
+			ctx.To,
 			ctx.DialTime.Round(time.Millisecond),
 			ctx.FirstByteTime.Round(time.Millisecond),
 			ctx.ServiceTime.Round(time.Millisecond),
@@ -94,7 +98,7 @@ func (r *Request) proxy(ctx *ProxyContext) {
 
 		if err != nil {
 			// log.Debug("proxy read failed:", err)
-			r.t.onRequestTerminate(r)
+			r.t.onServerReqTerminate(r)
 			break
 		}
 
@@ -111,9 +115,9 @@ func (r *Request) proxy(ctx *ProxyContext) {
 
 		ctx.Bytes = ctx.Bytes + int64(n)
 
-		err = r.t.onRequestData(r, buf[:n])
+		err = r.t.onServerReqData(r, buf[:n])
 		if err != nil {
-			log.Errorf("proxy read, tunnel onRequestData error: %s", err)
+			log.Errorf("proxy read, tunnel onServerReqData error: %s", err)
 			break
 		}
 	}
