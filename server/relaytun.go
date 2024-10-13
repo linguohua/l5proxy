@@ -96,7 +96,7 @@ func (t *RelayTunnel) onTunnelPing(data []byte) {
 
 	copy(newData[1:], data[1:])
 	now := time.Now().UnixMilli()
-	binary.LittleEndian.PutUint64(data[len(data):], uint64(now))
+	binary.LittleEndian.PutUint64(newData[len(data):], uint64(now))
 
 	data = newData
 }
