@@ -22,6 +22,8 @@ type RelayTunnel struct {
 
 	writeLock      sync.Mutex
 	writeLockRelay sync.Mutex
+
+	relayIndex int
 }
 
 func newRelayTunnel(cc *TunnelCreateCtx) (*RelayTunnel, error) {
@@ -46,7 +48,7 @@ func newRelayTunnel(cc *TunnelCreateCtx) (*RelayTunnel, error) {
 	}
 
 	cc.conn.SetPingHandler(func(data string) error {
-		rt.writeRelayPing([]byte(data))
+		rt.onTunnelPing([]byte(data))
 		return nil
 	})
 
@@ -61,7 +63,7 @@ func newRelayTunnel(cc *TunnelCreateCtx) (*RelayTunnel, error) {
 	})
 
 	relayConn.SetPongHandler(func(data string) error {
-		rt.writePong([]byte(data))
+		rt.onRelayPong([]byte(data))
 		return nil
 	})
 
@@ -70,6 +72,65 @@ func newRelayTunnel(cc *TunnelCreateCtx) (*RelayTunnel, error) {
 
 func (t *RelayTunnel) idx() int {
 	return t.id
+}
+
+func (t *RelayTunnel) onTunnelPing(data []byte) {
+	defer func() {
+		t.writeRelayPing([]byte(data))
+	}()
+
+	if len(data) == 0 || data[0] == 0 {
+		return
+	}
+
+	t.relayIndex = int(data[0])
+
+	newData := make([]byte, len(data)+8)
+
+	// add index
+	newData[0] = data[0] + 1
+
+	copy(newData[1:], data[1:])
+	now := time.Now().UnixMilli()
+	binary.LittleEndian.PutUint64(data[len(data):], uint64(now))
+
+	data = newData
+}
+
+func (t *RelayTunnel) onRelayPong(data []byte) {
+	defer func() {
+		t.writePong([]byte(data))
+	}()
+
+	if len(data) == 0 || data[0] == 0 {
+		return
+	}
+
+	if t.relayIndex == 0 {
+		return
+	}
+
+	allRelay := int(data[0]) - 1
+	if t.relayIndex == allRelay {
+		// we are the last relay, need to gernerate timestamp reply packet
+		newData := make([]byte, 2*allRelay+len(data))
+		newData[0] = data[0]
+		copy(newData[1+2*allRelay:], data[1:])
+		data = newData
+	}
+
+	if len(data) != 1+allRelay*2+(1+t.relayIndex)*8 {
+		return
+	}
+
+	myoffset := 1 + 2*allRelay + t.relayIndex*8
+	unixMilli := binary.LittleEndian.Uint64(data[myoffset:])
+	unixMilliNow := time.Now().UnixMilli()
+
+	elapsedMilli := uint16(unixMilliNow - int64(unixMilli))
+	binary.LittleEndian.PutUint16(data[1+(allRelay-t.relayIndex)*2:], elapsedMilli)
+
+	data = data[0:myoffset]
 }
 
 func (t *RelayTunnel) writeRelayPing(msg []byte) error {

@@ -191,7 +191,7 @@ func (t *Tunnel) keepalive() {
 	}
 
 	t.writeLock.Lock()
-	now := time.Now().Unix()
+	now := time.Now().UnixMilli()
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, uint64(now))
 	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
