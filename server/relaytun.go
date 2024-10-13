@@ -26,7 +26,13 @@ type RelayTunnel struct {
 
 func newRelayTunnel(cc *TunnelCreateCtx) (*RelayTunnel, error) {
 	uu := fmt.Sprintf("%s?endpoint=%s&uuid=%s&", cc.relayURL, cc.endpoint, cc.account)
-	relayConn, _, err := websocket.DefaultDialer.Dial(uu, nil)
+	d := websocket.Dialer{
+		ReadBufferSize:   wsReadBufSize,
+		WriteBufferSize:  wsWriteBufSize,
+		HandshakeTimeout: 5 * time.Second,
+	}
+
+	relayConn, _, err := d.Dial(uu, nil)
 	if err != nil {
 
 		return nil, err

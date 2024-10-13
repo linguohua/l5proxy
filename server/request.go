@@ -86,7 +86,7 @@ func (r *Request) proxy() {
 
 	now := time.Now()
 	firstByteMark := false
-	buf := make([]byte, 4096)
+	buf := make([]byte, 16*1024)
 	for {
 		n, err := c.Read(buf)
 

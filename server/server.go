@@ -11,8 +11,16 @@ import (
 	"net/http"
 )
 
+const (
+	wsReadBufSize  = 256 * 1024
+	wsWriteBufSize = 256 * 1024
+)
+
 var (
-	upgrader      = websocket.Upgrader{} // use default options
+	upgrader = websocket.Upgrader{
+		ReadBufferSize:  wsReadBufSize,
+		WriteBufferSize: wsWriteBufSize,
+	} // use default options
 	accountMap    = make(map[string]*Account)
 	dnsServerAddr *net.UDPAddr
 
