@@ -85,6 +85,10 @@ func (t *RelayTunnel) onTunnelPing(data []byte) {
 
 	t.relayIndex = int(data[0])
 
+	if len(data) != 1+t.relayIndex*8 {
+		return
+	}
+
 	newData := make([]byte, len(data)+8)
 
 	// add index
