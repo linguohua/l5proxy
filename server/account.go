@@ -39,8 +39,6 @@ func newAccount(uc *AccountTomlConfig) *Account {
 		maxTunnel: uc.MaxTunnel,
 		relayURL:  uc.RelayURL,
 		tunnels:   make(map[int]ITunnel),
-
-		withTimestamp: uc.WithTimestamp,
 	}
 }
 

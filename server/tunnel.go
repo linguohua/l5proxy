@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +22,6 @@ const (
 	cMDDNSReq            = 7
 	cMDDNSRsp            = 8
 	cMDUDPReq            = 9
-	cMDReqDataExt        = 10
 )
 
 type TunnelCreateCtx struct {
@@ -268,8 +266,6 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 		t.handleClientReqCreate(idx, tag, message[5:])
 	case cMDReqData:
 		t.handleClientReqData(idx, tag, message[5:])
-	case cMDReqDataExt:
-		t.handleClientReqDataExt(idx, tag, message[5:])
 	case cMDReqClientFinished:
 		t.handleClientReqFinished(idx, tag)
 	case cMDReqClientClosed:
@@ -349,58 +345,6 @@ func (t *Tunnel) handleClientReqData(idx uint16, tag uint16, message []byte) {
 	req.onClientData(message)
 }
 
-func (t *Tunnel) handleClientReqDataExt(idx, tag uint16, msg []byte) {
-	req, err := t.reqq.get(idx, tag)
-	if err != nil {
-		log.Debugf("handleClientReqDataExt error:%v", err)
-		return
-	}
-
-	t.dumpTimestamp(req, msg)
-
-	cut := len(msg) - (8 + 4*2)
-	req.onClientData(msg[0:cut])
-}
-
-func (t *Tunnel) dumpTimestamp(req *Request, msg []byte) {
-	ctx := req.ctx
-	if ctx == nil {
-		return
-	}
-
-	extraBytesLen := 8 + 4*2
-	size := len(msg)
-
-	if size <= extraBytesLen {
-		log.Errorf("tunnel %d dumpTimestamp failed, size %d not enough", t.id, size)
-		return
-	}
-
-	offset := size - extraBytesLen
-	unixMilli := binary.LittleEndian.Uint64(msg[offset:])
-	offset = offset + 8
-
-	unixMilliNow := time.Now().UnixMilli()
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Tunnel[%d] [%s]-->[%s],size:%d, timestamps[ms]:", t.id,
-		t.endpoint, ctx.To, size-extraBytesLen))
-
-	for i := 0; i < 4; i++ {
-		ts := binary.LittleEndian.Uint16(msg[offset:])
-		if ts == 0 {
-			break
-		}
-
-		offset = offset + 2
-		sb.WriteString(fmt.Sprintf("%d,", ts))
-	}
-
-	sb.WriteString(fmt.Sprintf("%d", unixMilliNow-int64(unixMilli)))
-
-	log.Infof(sb.String())
-}
-
 func (t *Tunnel) handleClientReqFinished(idx uint16, tag uint16) {
 	req, err := t.reqq.get(idx, tag)
 	if err != nil {
@@ -463,29 +407,14 @@ func (t *Tunnel) safeWriteRateChan(data []byte) error {
 }
 
 func (t *Tunnel) onServerReqData(req *Request, data []byte) error {
-	extraBytesLen := 0
-	if t.withTimestamp {
-		extraBytesLen = 8 + 4*2
-	}
-
 	cmdAndDataLen := 5 + len(data)
 
-	buf := make([]byte, cmdAndDataLen+extraBytesLen)
+	buf := make([]byte, cmdAndDataLen)
 
-	if t.withTimestamp {
-		buf[0] = cMDReqDataExt
-	} else {
-		buf[0] = cMDReqData
-	}
-
+	buf[0] = cMDReqData
 	binary.LittleEndian.PutUint16(buf[1:], req.idx)
 	binary.LittleEndian.PutUint16(buf[3:], req.tag)
 	copy(buf[5:], data)
-	if t.withTimestamp {
-		// write timestamp
-		timestamp := uint64(time.Now().UnixMilli())
-		binary.LittleEndian.PutUint64(buf[cmdAndDataLen:], timestamp)
-	}
 
 	if t.rateLimit > 0 {
 		return t.safeWriteRateChan(buf)

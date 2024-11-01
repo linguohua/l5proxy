@@ -248,23 +248,11 @@ func (rt *RelayTunnel) onCloseRelay() {
 }
 
 func (rt *RelayTunnel) onTunnelMessage(message []byte) error {
-	cmd := message[0]
-	if cmd == cMDReqDataExt {
-		// add my timestamp
-		rt.setTimestamp(message)
-	}
-
 	// write to relay target server
 	return rt.writeRelay(message)
 }
 
 func (rt *RelayTunnel) onTunnelMessageRelay(message []byte) error {
-	cmd := message[0]
-	if cmd == cMDReqDataExt {
-		// add my timestamp
-		rt.setTimestamp(message)
-	}
-
 	// write to client
 	return rt.write(message)
 }
@@ -275,43 +263,4 @@ func (rt *RelayTunnel) keepalive() {
 
 func (rt *RelayTunnel) rateLimitReset(int) {
 	// nothing to do
-}
-
-func (rt *RelayTunnel) setTimestamp(message []byte) {
-	extraBytesLen := 8 + 4*2
-	size := len(message)
-
-	if size <= 5+extraBytesLen {
-		log.Errorf("Relay tunnel %d setTimestamp failed, size %d not enough", rt.id, size)
-		return
-	}
-
-	offset := size - extraBytesLen
-
-	unixMilli := binary.LittleEndian.Uint64(message[offset:])
-
-	unixMilliNow := time.Now().UnixMilli()
-	if unixMilliNow < int64(unixMilli) {
-		log.Errorf("Relay tunnel %d setTimestamp failed, unix time not large than prev's", rt.id)
-		return
-	}
-
-	elapsedMilli := uint16(unixMilliNow - int64(unixMilli))
-	offset = offset + 8
-
-	add := false
-	for i := 0; i < 4; i++ {
-		ts := binary.LittleEndian.Uint16(message[offset:])
-		if ts == 0 {
-			binary.LittleEndian.PutUint16(message[offset:], elapsedMilli)
-			add = true
-			break
-		}
-
-		offset = offset + 2
-	}
-
-	if !add {
-		log.Errorf("Relay tunnel %d setTimestamp failed, slots are fulled", rt.id)
-	}
 }
