@@ -100,7 +100,7 @@ func TestHeartbeatNegotiationAndCompatibility(t *testing.T) {
 	}
 }
 
-func TestScreenHeartbeatSleepResumeAndInterval(t *testing.T) {
+func TestScreenHeartbeatIntervalAppliesWhileAsleep(t *testing.T) {
 	diagnostics.enabled.Store(true)
 	defer diagnostics.enabled.Store(false)
 
@@ -159,6 +159,9 @@ func TestScreenHeartbeatSleepResumeAndInterval(t *testing.T) {
 			defer func() { client.Close(); <-readerDone }()
 			exchange := func(payload string) {
 				t.Helper()
+				// Windows wall-clock samples can share a tick; ensure the reply
+				// observation is later than the probe for this real-I/O test.
+				time.Sleep(2 * time.Millisecond)
 				if err := client.WriteControl(websocket.PingMessage, []byte(payload), time.Now().Add(time.Second)); err != nil {
 					t.Fatal(err)
 				}
@@ -172,7 +175,7 @@ func TestScreenHeartbeatSleepResumeAndInterval(t *testing.T) {
 				}
 			}
 			tunnel.lastTx.Store(time.Now().Add(-29 * time.Minute).UnixNano())
-			tunnel.screenKeepalive(time.Now())
+			tunnel.intervalKeepalive(time.Now())
 			select {
 			case <-pings:
 				t.Fatal("Ping before 30m")
@@ -180,14 +183,14 @@ func TestScreenHeartbeatSleepResumeAndInterval(t *testing.T) {
 			}
 			exchange("l5:sleep")
 			tunnel.lastTx.Store(time.Now().Add(-2 * time.Hour).UnixNano())
-			tunnel.screenKeepalive(time.Now())
+			tunnel.intervalKeepalive(time.Now())
 			// An ordered control exchange confirms the reader passed all earlier frames.
 			exchange("sleep-barrier")
 			if tunnel.diagnostic == nil {
 				t.Fatal("missing diagnostic record")
 			}
 			d := tunnel.diagnostic.snapshot()
-			if d["sleep_rx"] != uint64(1) || d["asleep"] != true || d["ping_tx"] != uint64(0) {
+			if d["sleep_rx"] != uint64(1) || d["asleep"] != true || d["ping_tx"] != uint64(1) {
 				t.Fatalf("wrong sleep counters: %v", d)
 			}
 			if rsp.Header.Get(diagnosticHeader) != tunnel.diagnostic.id {
@@ -196,12 +199,12 @@ func TestScreenHeartbeatSleepResumeAndInterval(t *testing.T) {
 
 			select {
 			case <-pings:
-				t.Fatal("Ping while sleeping")
-			default:
+			case <-time.After(time.Second):
+				t.Fatal("missing negotiated server Ping while sleeping")
 			}
 			exchange("l5:awake")
 			tunnel.lastTx.Store(time.Now().Add(-31 * time.Minute).UnixNano())
-			tunnel.screenKeepalive(time.Now())
+			tunnel.intervalKeepalive(time.Now())
 			select {
 			case <-pings:
 			case <-time.After(time.Second):
@@ -209,7 +212,7 @@ func TestScreenHeartbeatSleepResumeAndInterval(t *testing.T) {
 			}
 			exchange("awake-barrier")
 			d = tunnel.diagnostic.snapshot()
-			if d["awake_rx"] != uint64(1) || d["asleep"] != false || d["ping_tx"] != uint64(1) {
+			if d["awake_rx"] != uint64(1) || d["asleep"] != false || d["ping_tx"] != uint64(2) {
 				t.Fatalf("wrong awake counters: %v", d)
 			}
 			response := httptest.NewRecorder()
@@ -218,7 +221,7 @@ func TestScreenHeartbeatSleepResumeAndInterval(t *testing.T) {
 				t.Fatal("targeted diagnostic close failed")
 			}
 
-			tunnel.screenKeepalive(time.Now())
+			tunnel.intervalKeepalive(time.Now())
 		})
 	}
 }
@@ -334,5 +337,53 @@ func TestDeployedHeartbeatAndTCP(t *testing.T) {
 			}
 			client.WriteMessage(websocket.BinaryMessage, []byte{3, 0, 0, 1, 0})
 		})
+	}
+}
+
+// An asleep client that no longer answers must be closed by the same probe deadline.
+func TestScreenHeartbeatSilentPeerCloses(t *testing.T) {
+	accepted := make(chan *Tunnel, 1)
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(done)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		tunnel, err := newTunnel(&TunnelCreateCtx{conn: conn, cap: 1, heartbeat: heartbeatOptions{interval: 1800 * time.Second, asleep: true}, reverseServ: &ReverseServ{tunnels: make(map[string]TunnelMap)}})
+		if err != nil {
+			return
+		}
+		accepted <- tunnel
+		tunnel.serve()
+	}))
+	defer srv.Close()
+	client, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { client.Close(); <-done }()
+	var tunnel *Tunnel
+	select {
+	case tunnel = <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("missing tunnel")
+	}
+	// Client never reads, so it cannot automatically respond to this Ping.
+	tunnel.lastTx.Store(time.Now().Add(-31 * time.Minute).UnixNano())
+	tunnel.intervalKeepalive(time.Now())
+	tunnel.heartbeatLock.Lock()
+	if tunnel.probeAt.IsZero() {
+		tunnel.heartbeatLock.Unlock()
+		t.Fatal("sleep suppressed probe")
+	}
+	deadline := tunnel.probeAt.Add(31 * time.Second)
+	tunnel.heartbeatLock.Unlock()
+	tunnel.intervalKeepalive(deadline)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("silent sleeping peer was not closed")
 	}
 }

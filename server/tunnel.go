@@ -110,20 +110,17 @@ func newTunnel(cc *TunnelCreateCtx) (*Tunnel, error) {
 	cc.conn.SetPingHandler(func(data string) error {
 		t.diagnostic.event("ping-rx")
 		t.refreshHeartbeatDeadline()
+		// Screen notices are diagnostic metadata only. The negotiated server
+		// heartbeat interval applies regardless of the client's screen state.
 		if t.heartbeat.interval > 0 {
-			t.heartbeatLock.Lock()
 			if data == "l5:sleep" {
 				t.diagnostic.event("sleep")
-				t.heartbeat.asleep = true
-				t.probeAt = time.Time{}
 			}
 			if data == "l5:awake" {
 				t.diagnostic.event("awake")
-				t.heartbeat.asleep = false
-				t.probeAt = time.Time{}
 			}
-			t.heartbeatLock.Unlock()
 		}
+
 		return t.writePong([]byte(data))
 	})
 
@@ -242,7 +239,7 @@ func (t *Tunnel) refreshHeartbeatDeadline() {
 func (t *Tunnel) keepalive() {
 	t.udpCache.keepalive()
 	if t.heartbeat.interval > 0 {
-		t.screenKeepalive(time.Now())
+		t.intervalKeepalive(time.Now())
 		return
 	}
 	if t.clientHeartbeat {
@@ -267,20 +264,14 @@ func (t *Tunnel) keepalive() {
 	t.writeLock.Unlock()
 }
 
-// No read deadline in v2: sleep is allowed to outlive NAT mappings.
+// The negotiated interval applies even while the client is asleep.
+// Probe response deadlines reclaim stale connections without a fixed read timeout.
 // Called by the existing server maintenance tick; never schedules a phone-side timer.
-func (t *Tunnel) screenKeepalive(now time.Time) {
+func (t *Tunnel) intervalKeepalive(now time.Time) {
 	t.heartbeatLock.Lock()
 	defer t.heartbeatLock.Unlock()
 	rx := time.Unix(0, t.lastRx.Load())
 	tx := time.Unix(0, t.lastTx.Load())
-	if t.heartbeat.asleep {
-		// Reclaim abandoned transports without sending a wakeup probe.
-		if now.Sub(rx) >= 24*time.Hour && now.Sub(tx) >= 24*time.Hour {
-			t.conn.Close()
-		}
-		return
-	}
 	if !t.probeAt.IsZero() {
 		if rx.After(t.probeAt) {
 			t.probeAt = time.Time{}
