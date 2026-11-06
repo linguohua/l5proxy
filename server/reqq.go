@@ -55,7 +55,7 @@ func (q *Reqq) allocForConn(conn *net.TCPConn) (*Request, error) {
 			return req, nil
 		}
 	}
-	return nil, nil
+	return nil, fmt.Errorf("connection queue is full")
 }
 
 func (q *Reqq) free(idx uint16, tag uint16) error {

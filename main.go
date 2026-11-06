@@ -32,13 +32,13 @@ func toLogLevel(logLevel string) log.Level {
 	if len(logLevel) > 0 {
 		switch strings.ToLower(logLevel) {
 		case "debug":
-			defaultLogLevel = log.DebugLevel
+			ll = log.DebugLevel
 		case "info":
-			defaultLogLevel = log.InfoLevel
+			ll = log.InfoLevel
 		case "warn":
-			defaultLogLevel = log.WarnLevel
+			ll = log.WarnLevel
 		case "error":
-			defaultLogLevel = log.ErrorLevel
+			ll = log.ErrorLevel
 		}
 	}
 

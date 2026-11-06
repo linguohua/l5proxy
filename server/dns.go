@@ -7,8 +7,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var dnsSlots = make(chan struct{}, 64)
+
 func doDNSQuery(tun *Tunnel, dnsPacket []byte) {
 	// the packet format: [cmd 1byte] + [address type 1byte] + [ip address n-bytes] + [port 2bytes]
+	if len(dnsPacket) < 2 {
+		return
+	}
 	var skipLength int
 	addressType := dnsPacket[1]
 	switch addressType {
@@ -23,12 +28,16 @@ func doDNSQuery(tun *Tunnel, dnsPacket []byte) {
 
 	skipLength = skipLength + 1 + 1 + 2 // cmd, address type, ip, port
 
+	if len(dnsPacket) < skipLength {
+		return
+	}
 	conn, err := net.DialUDP("udp", nil, dnsServerAddr)
 	if err != nil {
 		log.Errorf("doDNSQuery, DialUDP failed:%s", err)
 		return
 	}
 
+	defer conn.Close()
 	// log.Infof("doDNSQuery, dns query lenght:%d", len(dnsPacket)-skipLength)
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, err = conn.Write(dnsPacket[skipLength:])

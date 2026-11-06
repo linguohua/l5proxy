@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,6 +79,8 @@ type Tunnel struct {
 	rateChanLock sync.Mutex
 	rateChan     chan []byte
 	rateWg       *sync.WaitGroup
+	rateDone     chan struct{}
+	rateClose    sync.Once
 
 	udpCache    *UdpCache
 	endpoint    string
@@ -134,6 +137,7 @@ func newTunnel(cc *TunnelCreateCtx) (*Tunnel, error) {
 	if cc.rateLimit > 0 {
 		// 100 item
 		t.rateChan = make(chan []byte, 100)
+		t.rateDone = make(chan struct{})
 	}
 
 	cc.reverseServ.onTunnelConnect(t)
@@ -145,6 +149,8 @@ func (t *Tunnel) idx() int {
 }
 
 func (t *Tunnel) rateLimitReset(quota int) {
+	t.rateChanLock.Lock()
+	defer t.rateChanLock.Unlock()
 	t.rateQuota = quota
 
 	if t.rateWg != nil {
@@ -154,10 +160,10 @@ func (t *Tunnel) rateLimitReset(quota int) {
 }
 
 func (t *Tunnel) waitQuota(q int) {
+	t.rateChanLock.Lock()
 	if t.rateQuota < q {
 		t.rateQuota = 0
 
-		t.rateChanLock.Lock()
 		if t.rateChan == nil {
 			t.rateChanLock.Unlock()
 			return
@@ -170,15 +176,27 @@ func (t *Tunnel) waitQuota(q int) {
 
 		t.rateChanLock.Unlock()
 
+		select {
+		case <-t.rateDone:
+			return
+		default:
+		}
 		wg.Wait()
 	} else {
 		t.rateQuota = t.rateQuota - q
+		t.rateChanLock.Unlock()
 	}
 }
 
 func (t *Tunnel) drainRateChan() {
 	for {
-		buf, ok := <-t.rateChan
+		var buf []byte
+		var ok bool
+		select {
+		case <-t.rateDone:
+			return
+		case buf, ok = <-t.rateChan:
+		}
 
 		if !ok {
 			// channel has been closed
@@ -325,17 +343,9 @@ func (t *Tunnel) onPong(_ []byte) {
 
 func (t *Tunnel) onClose() {
 	t.diagnostic.finish()
-	if t.rateLimit > 0 && t.rateChan != nil {
-		t.rateChanLock.Lock()
-		t.rateLimit = 0
-		close(t.rateChan)
-		t.rateChan = nil
-
-		if t.rateWg != nil {
-			t.rateWg.Done()
-		}
-
-		t.rateChanLock.Unlock()
+	if t.rateDone != nil {
+		t.rateClose.Do(func() { close(t.rateDone) })
+		t.rateLimitReset(0)
 	}
 
 	t.reqq.cleanup()
@@ -352,7 +362,11 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 	cmd := message[0]
 	if cmd == cMDDNSReq {
 		// TODO: too many goroutines
-		go doDNSQuery(t, message)
+		select {
+		case dnsSlots <- struct{}{}:
+			go func() { defer func() { <-dnsSlots }(); doDNSQuery(t, message) }()
+		default:
+		}
 		return nil
 	}
 
@@ -382,28 +396,34 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 }
 
 func (t *Tunnel) handleClientReqCreate(idx uint16, tag uint16, message []byte) {
+	if len(message) < 1 {
+		return
+	}
 	addressType := message[0]
 	var port uint16
 	var domain string
 	switch addressType {
 	case 0: // ipv4
+		if len(message) < 7 {
+			return
+		}
 		domain = fmt.Sprintf("%d.%d.%d.%d", message[1], message[2], message[3], message[4])
 		port = binary.LittleEndian.Uint16(message[5:])
 	case 1: // domain name
-		domainLen := message[1]
+		if len(message) < 2 {
+			return
+		}
+		domainLen := int(message[1])
+		if len(message) < 4+domainLen {
+			return
+		}
 		domain = string(message[2 : 2+domainLen])
 		port = binary.LittleEndian.Uint16(message[(2 + domainLen):])
 	case 2: // ipv6
-		p1 := binary.LittleEndian.Uint16(message[1:])
-		p2 := binary.LittleEndian.Uint16(message[3:])
-		p3 := binary.LittleEndian.Uint16(message[5:])
-		p4 := binary.LittleEndian.Uint16(message[7:])
-		p5 := binary.LittleEndian.Uint16(message[9:])
-		p6 := binary.LittleEndian.Uint16(message[11:])
-		p7 := binary.LittleEndian.Uint16(message[13:])
-		p8 := binary.LittleEndian.Uint16(message[15:])
-
-		domain = fmt.Sprintf("%d:%d:%d:%d:%d:%d:%d:%d", p8, p7, p6, p5, p4, p3, p2, p1)
+		if len(message) < 19 {
+			return
+		}
+		domain = net.IP(message[1:17]).String()
 		port = binary.LittleEndian.Uint16(message[17:])
 	default:
 		log.Errorf("handleRequestCreate, not support addressType:%d", addressType)
@@ -416,7 +436,7 @@ func (t *Tunnel) handleClientReqCreate(idx uint16, tag uint16, message []byte) {
 		return
 	}
 
-	addr := fmt.Sprintf("%s:%d", domain, port)
+	addr := net.JoinHostPort(domain, strconv.Itoa(int(port)))
 
 	now := time.Now()
 	ts := time.Second * 2
@@ -489,24 +509,13 @@ func (t *Tunnel) onRequestHalfClosed(req *Request) {
 }
 
 func (t *Tunnel) safeWriteRateChan(data []byte) error {
-	t.rateChanLock.Lock() // lock to prevent write to a closed channel
-	ch := t.rateChan
-	t.rateChanLock.Unlock()
-
-	var err error
-	defer func() {
-		if recover() != nil {
-			err = fmt.Errorf("tunnel has closed")
-		}
-	}()
-
-	if ch != nil {
-		ch <- data
-	} else {
-		err = fmt.Errorf("tunnel has closed")
+	select {
+	case <-t.rateDone:
+		return fmt.Errorf("tunnel has closed")
+	case t.rateChan <- data:
+		return nil
 	}
 
-	return err
 }
 
 func (t *Tunnel) onServerReqData(req *Request, data []byte) error {
@@ -528,18 +537,27 @@ func (t *Tunnel) onServerReqData(req *Request, data []byte) error {
 
 func (t *Tunnel) handleUDPReq(data []byte) {
 	// skip cmd
+	if len(data) < 1 {
+		return
+	}
 	src := parseAddress(data[1:])
+	if src == nil {
+		return
+	}
 
 	srcIPLen := net.IPv6len
-	if src.IP.To4() != nil {
+	if data[3] == 0 {
 		srcIPLen = net.IPv4len
 	}
 
 	// 4 = cmd + iptype + port
 	dst := parseAddress(data[4+srcIPLen:])
+	if dst == nil {
+		return
+	}
 
 	destIPLen := net.IPv6len
-	if dst.IP.To4() != nil {
+	if data[6+srcIPLen] == 0 {
 		destIPLen = net.IPv4len
 	}
 
@@ -587,7 +605,21 @@ func (t *Tunnel) onServerUDPData(data []byte, src *net.UDPAddr, dst *net.UDPAddr
 }
 
 func parseAddress(msg []byte) *net.UDPAddr {
-	// skip cmd
+	if len(msg) < 3 {
+		return nil
+	}
+	size := 0
+	switch msg[2] {
+	case 0:
+		size = 4
+	case 2:
+		size = 16
+	default:
+		return nil
+	}
+	if len(msg) < 3+size {
+		return nil
+	}
 	var ip []byte = nil
 
 	offset := 0

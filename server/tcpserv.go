@@ -51,9 +51,12 @@ func (tcpServ *TCPServ) startTCPServer(listener net.Listener, endpoint string, s
 func (tcpServ *TCPServ) handleConnection(conn net.Conn, endpoint string, src *net.TCPAddr) {
 	tunnel := tcpServ.reverse.getTunnel(endpoint)
 	if tunnel == nil {
+		conn.Close()
 		log.Errorf("can not get tunnel for endpoint %s", endpoint)
 		return
 	}
 
-	tunnel.acceptTCPConn(conn, src)
+	if err := tunnel.acceptTCPConn(conn, src); err != nil {
+		conn.Close()
+	}
 }

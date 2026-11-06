@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	"net"
 	"time"
 
@@ -96,18 +97,6 @@ func (r *Request) proxy() {
 			break
 		}
 
-		if err != nil {
-			// log.Debug("proxy read failed:", err)
-			r.t.onServerReqTerminate(r)
-			break
-		}
-
-		if n == 0 {
-			// log.Debug("proxy read, server half close")
-			r.t.onRequestHalfClosed(r)
-			break
-		}
-
 		if !firstByteMark {
 			firstByteMark = true
 			ctx.FirstByteTime = time.Since(now)
@@ -115,9 +104,22 @@ func (r *Request) proxy() {
 
 		ctx.Bytes = ctx.Bytes + int64(n)
 
-		err = r.t.onServerReqData(r, buf[:n])
+		readErr := err
+		if n > 0 {
+			err = r.t.onServerReqData(r, buf[:n])
+		} else {
+			err = nil
+		}
 		if err != nil {
 			log.Errorf("proxy read, tunnel onServerReqData error: %s", err)
+			break
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				r.t.onRequestHalfClosed(r)
+			} else {
+				r.t.onServerReqTerminate(r)
+			}
 			break
 		}
 	}

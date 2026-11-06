@@ -7,18 +7,28 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
 var (
 	whitelistLock      sync.Mutex
+	whitelistFetchLock sync.Mutex
 	whitelistStrings   string
 	whitelistGenerated bool
 )
 
 func generateWhitelist() error {
-	rsp, err := http.Get("https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/refs/heads/master/accelerated-domains.china.conf")
+	whitelistFetchLock.Lock()
+	defer whitelistFetchLock.Unlock()
+	whitelistLock.Lock()
+	ready := whitelistGenerated
+	whitelistLock.Unlock()
+	if ready {
+		return nil
+	}
+	rsp, err := (&http.Client{Timeout: 10 * time.Second}).Get("https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/refs/heads/master/accelerated-domains.china.conf")
 	if err != nil {
 		return err
 	}
@@ -75,8 +85,10 @@ func generateWhitelist() error {
 			sb.WriteString("\n")
 		}
 
+		whitelistLock.Lock()
 		whitelistStrings = sb.String()
 		whitelistGenerated = true
+		whitelistLock.Unlock()
 		return nil
 	} else {
 		return fmt.Errorf("generate whitelist rsp status code %d != 200", rsp.StatusCode)
@@ -84,18 +96,14 @@ func generateWhitelist() error {
 }
 
 func whitelistHandler(w http.ResponseWriter, r *http.Request) {
-	whitelistLock.Lock()
-	defer whitelistLock.Unlock()
-
-	if whitelistGenerated {
-		w.Write([]byte(whitelistStrings))
-	} else {
-		err := generateWhitelist()
-		if err != nil {
-			log.Errorf("generate whitelist failed:%s", err)
-			w.Write([]byte("cn"))
-		} else {
-			w.Write([]byte(whitelistStrings))
-		}
+	if err := generateWhitelist(); err != nil {
+		log.Errorf("generate whitelist failed:%s", err)
 	}
+	whitelistLock.Lock()
+	result := whitelistStrings
+	whitelistLock.Unlock()
+	if result == "" {
+		result = "cn"
+	}
+	w.Write([]byte(result))
 }

@@ -67,6 +67,8 @@ func (serv *ReverseServ) onTunnelClose(tunnel *Tunnel) {
 }
 
 func (serv *ReverseServ) getTunnel(endpoint string) *Tunnel {
+	serv.lock.Lock()
+	defer serv.lock.Unlock()
 	tunnelMap := serv.tunnels[endpoint]
 	if tunnelMap == nil {
 		return nil

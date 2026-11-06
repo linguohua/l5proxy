@@ -31,26 +31,8 @@ func (u *UdpStub) writeTo(dest *net.UDPAddr, data []byte) error {
 
 	u.lastActvity = time.Now()
 
-	destAddr, err := net.ResolveUDPAddr("udp", dest.String())
-	if err != nil {
-		return err
-	}
-
-	wrote := 0
-	l := len(data)
-	for {
-		n, err := conn.WriteToUDP(data[wrote:], destAddr)
-		if err != nil {
-			return err
-		}
-
-		wrote = wrote + n
-		if wrote == l {
-			break
-		}
-	}
-
-	return nil
+	_, err := conn.WriteToUDP(data, dest)
+	return err
 }
 
 func (u *UdpStub) onServerData(data []byte, dest *net.UDPAddr) {

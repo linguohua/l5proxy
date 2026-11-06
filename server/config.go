@@ -51,11 +51,11 @@ func ParseConfig(filePath string) (*L5proxyConfig, error) {
 	}
 
 	if config.Server.Address == "" {
-		return nil, fmt.Errorf("must provide address to listen")
+		config.Server.Address = ":8085"
 	}
 
 	if config.Server.WebsocketPath == "" {
-		return nil, fmt.Errorf("must provide a websocket URL path")
+		config.Server.WebsocketPath = "/l5proxy"
 	}
 
 	for _, a := range config.Accounts {

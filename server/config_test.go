@@ -9,5 +9,5 @@ func TestParseConfig(t *testing.T) {
 		t.Errorf("parse config file failed:%s", err)
 	}
 
-	t.Errorf("%+v", cfg)
+	t.Logf("%+v", cfg)
 }
