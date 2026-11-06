@@ -87,6 +87,11 @@ func main() {
 
 	log.Infof("try to start  l5proxy server, version:%s", getVersion())
 
+	stopDiagnostics, err := server.StartDiagnostics()
+	if err != nil {
+		log.Fatal("start local diagnostics failed: ", err)
+	}
+	defer stopDiagnostics()
 	// start http server
 	go server.CreateHTTPServer(cfg)
 	log.Info("start l5proxy server ok!")

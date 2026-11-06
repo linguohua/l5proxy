@@ -42,7 +42,7 @@ func newAccount(uc *AccountTomlConfig) *Account {
 	}
 }
 
-func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string) (ITunnel, error) {
+func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string, opts heartbeatOptions) (ITunnel, error) {
 	a.writeLock.Lock()
 	a.tunnelInBuilding++
 	tunnelCount := len(a.tunnels) + a.tunnelInBuilding
@@ -64,6 +64,7 @@ func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, en
 	var tun ITunnel
 	var err error
 	cc := &TunnelCreateCtx{
+		heartbeat:     opts,
 		id:            idx,
 		conn:          conn,
 		endpoint:      endpoint,
@@ -85,10 +86,10 @@ func (a *Account) buildTunnel(conn *websocket.Conn, reverseServ *ReverseServ, en
 	return tun, err
 }
 
-func (a *Account) acceptWebsocket(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string) {
+func (a *Account) acceptWebsocket(conn *websocket.Conn, reverseServ *ReverseServ, endpoint string, opts heartbeatOptions) {
 	log.Infof("account:%s try to accept websocket, endpoint:%s", a.uuid, endpoint)
 
-	tun, err := a.buildTunnel(conn, reverseServ, endpoint)
+	tun, err := a.buildTunnel(conn, reverseServ, endpoint, opts)
 	if err != nil {
 		log.Errorf("account %s accept websocket failed cause create tunnel failed:%v", a.uuid, err)
 		return

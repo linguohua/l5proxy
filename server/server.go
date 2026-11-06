@@ -30,12 +30,46 @@ var (
 type AddressMap map[string]string
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
-	c, err := upgrader.Upgrade(w, r, nil)
+	// Only direct tunnels negotiate this mode; relay tunnels retain legacy heartbeats.
+	accountForHeartbeat := accountMap[r.URL.Query().Get("uuid")]
+	opts := heartbeatOptions{}
+	headers := http.Header{}
+	if accountForHeartbeat != nil && accountForHeartbeat.relayURL == "" {
+		switch r.Header.Get(heartbeatHeader) {
+		case heartbeatCapability:
+			opts.clientIdle = true
+			headers.Set(heartbeatHeader, heartbeatCapability)
+		case screenHeartbeatCapability:
+			if r.Header.Get(serverPingHeader) == "1800" && (r.Header.Get(screenHeader) == "0" || r.Header.Get(screenHeader) == "1") {
+				opts.interval = 1800 * time.Second
+				opts.asleep = r.Header.Get(screenHeader) == "0"
+				headers.Set(heartbeatHeader, screenHeartbeatCapability)
+				headers.Set(serverPingHeader, "1800")
+				headers.Set(screenHeader, r.Header.Get(screenHeader))
+			}
+		}
+	}
+	if opts.interval > 0 {
+		opts.diagnosticID = nextDiagnosticID()
+		if opts.diagnosticID != "" {
+			headers.Set(diagnosticHeader, opts.diagnosticID)
+		}
+	}
+	c, err := upgrader.Upgrade(w, r, headers)
 	if err != nil {
 		log.Errorf("upgrade:%s", err)
 		return
 	}
 	defer c.Close()
+	if opts.interval > 0 {
+		// Go HTTP accepts enable TCP keepalive by default; it must not bypass sleep policy.
+		if tcp, ok := c.UnderlyingConn().(*net.TCPConn); ok {
+			if err := tcp.SetKeepAlive(false); err != nil {
+				log.Error("disable tunnel TCP keepalive failed")
+				return
+			}
+		}
+	}
 
 	var uuid = r.URL.Query().Get("uuid")
 	if uuid == "" {
@@ -55,7 +89,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	account.acceptWebsocket(c, reverseServer, endpoint)
+	account.acceptWebsocket(c, reverseServer, endpoint, opts)
 }
 
 // indexHandler responds to requests with our greeting.

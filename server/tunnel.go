@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -24,7 +25,24 @@ const (
 	cMDUDPReq            = 9
 )
 
+const heartbeatHeader = "X-L5-Heartbeat"
+const heartbeatCapability = "client-idle-v1" // compatibility with the previous client
+const screenHeartbeatCapability = "screen-idle-v2"
+const serverPingHeader = "X-L5-Server-Ping-Seconds"
+const screenHeader = "X-L5-Screen-Interactive"
+
+type heartbeatOptions struct {
+	diagnosticID string
+	clientIdle   bool
+	interval     time.Duration
+	asleep       bool
+}
+
+// Client idle <= 300s, alignment <= 5s, probe response <= 30s, plus scheduling margin.
+const clientHeartbeatReadTimeout = 390 * time.Second
+
 type TunnelCreateCtx struct {
+	heartbeat   heartbeatOptions
 	account     string
 	id          int
 	conn        *websocket.Conn
@@ -40,12 +58,19 @@ type TunnelCreateCtx struct {
 
 // Tunnel tunnel
 type Tunnel struct {
-	id   int
-	conn *websocket.Conn
-	reqq *Reqq
+	diagnostic *tunnelDiagnostic
+	id         int
+	conn       *websocket.Conn
+	reqq       *Reqq
 
-	writeLock sync.Mutex
-	waitping  int
+	writeLock       sync.Mutex
+	waitping        atomic.Int32
+	clientHeartbeat bool
+	heartbeat       heartbeatOptions
+	heartbeatLock   sync.Mutex
+	lastRx          atomic.Int64
+	lastTx          atomic.Int64
+	probeAt         time.Time
 
 	rateLimit int
 	rateQuota int
@@ -64,25 +89,47 @@ type Tunnel struct {
 
 func newTunnel(cc *TunnelCreateCtx) (*Tunnel, error) {
 	t := &Tunnel{
-		id:            cc.id,
-		conn:          cc.conn,
-		rateLimit:     cc.rateLimit,
-		rateQuota:     cc.rateLimit,
-		udpCache:      newUdpCache(),
-		endpoint:      cc.endpoint,
-		reverseServ:   cc.reverseServ,
-		withTimestamp: cc.withTimestamp,
+		clientHeartbeat: cc.heartbeat.clientIdle,
+		heartbeat:       cc.heartbeat,
+		id:              cc.id,
+		conn:            cc.conn,
+		rateLimit:       cc.rateLimit,
+		rateQuota:       cc.rateLimit,
+		udpCache:        newUdpCache(),
+		endpoint:        cc.endpoint,
+		reverseServ:     cc.reverseServ,
+		withTimestamp:   cc.withTimestamp,
 	}
 
+	t.diagnostic = newTunnelDiagnostic(cc.heartbeat.diagnosticID, cc.heartbeat.asleep, cc.conn.Close)
+	t.lastRx.Store(time.Now().UnixNano())
+	t.lastTx.Store(time.Now().UnixNano())
 	reqq := newReqq(cc.cap, t)
 	t.reqq = reqq
 
 	cc.conn.SetPingHandler(func(data string) error {
-		t.writePong([]byte(data))
-		return nil
+		t.diagnostic.event("ping-rx")
+		t.refreshHeartbeatDeadline()
+		if t.heartbeat.interval > 0 {
+			t.heartbeatLock.Lock()
+			if data == "l5:sleep" {
+				t.diagnostic.event("sleep")
+				t.heartbeat.asleep = true
+				t.probeAt = time.Time{}
+			}
+			if data == "l5:awake" {
+				t.diagnostic.event("awake")
+				t.heartbeat.asleep = false
+				t.probeAt = time.Time{}
+			}
+			t.heartbeatLock.Unlock()
+		}
+		return t.writePong([]byte(data))
 	})
 
 	cc.conn.SetPongHandler(func(data string) error {
+		t.diagnostic.event("pong-rx")
+		t.refreshHeartbeatDeadline()
 		t.onPong([]byte(data))
 		return nil
 	})
@@ -163,6 +210,7 @@ func (t *Tunnel) serve() {
 	}
 
 	c := t.conn
+	t.refreshHeartbeatDeadline()
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
@@ -170,6 +218,7 @@ func (t *Tunnel) serve() {
 			break
 		}
 
+		t.refreshHeartbeatDeadline()
 		// log.Infof("Tunnel recv message, len:%d", len(message))
 		err = t.onTunnelMessage(message)
 		if err != nil {
@@ -181,47 +230,110 @@ func (t *Tunnel) serve() {
 	t.onClose()
 }
 
+// Called only from the connection reader and its control handlers (Gorilla read ownership).
+func (t *Tunnel) refreshHeartbeatDeadline() {
+	t.diagnostic.event("rx")
+	t.lastRx.Store(time.Now().UnixNano())
+	if t.clientHeartbeat {
+		t.conn.SetReadDeadline(time.Now().Add(clientHeartbeatReadTimeout))
+	}
+}
+
 func (t *Tunnel) keepalive() {
-	if t.waitping > 3 {
+	t.udpCache.keepalive()
+	if t.heartbeat.interval > 0 {
+		t.screenKeepalive(time.Now())
+		return
+	}
+	if t.clientHeartbeat {
+		return
+	}
+	if t.waitping.Load() > 3 {
 		log.Errorf("Tunnel keepalive failed")
 		t.conn.Close()
 		return
 	}
 
+	t.waitping.Add(1)
 	t.writeLock.Lock()
 	now := time.Now().UnixMilli()
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, uint64(now))
 	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
-	t.conn.WriteMessage(websocket.PingMessage, b)
+	if t.conn.WriteMessage(websocket.PingMessage, b) == nil {
+		t.diagnostic.event("ping-tx")
+		t.diagnostic.event("tx")
+	}
 	t.writeLock.Unlock()
-
-	t.waitping++
-
-	t.udpCache.keepalive()
 }
 
-func (t *Tunnel) writePong(msg []byte) {
-	t.writeLock.Lock()
-	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
-	t.conn.WriteMessage(websocket.PongMessage, msg)
-	t.writeLock.Unlock()
+// No read deadline in v2: sleep is allowed to outlive NAT mappings.
+// Called by the existing server maintenance tick; never schedules a phone-side timer.
+func (t *Tunnel) screenKeepalive(now time.Time) {
+	t.heartbeatLock.Lock()
+	defer t.heartbeatLock.Unlock()
+	rx := time.Unix(0, t.lastRx.Load())
+	tx := time.Unix(0, t.lastTx.Load())
+	if t.heartbeat.asleep {
+		// Reclaim abandoned transports without sending a wakeup probe.
+		if now.Sub(rx) >= 24*time.Hour && now.Sub(tx) >= 24*time.Hour {
+			t.conn.Close()
+		}
+		return
+	}
+	if !t.probeAt.IsZero() {
+		if rx.After(t.probeAt) {
+			t.probeAt = time.Time{}
+		} else {
+			if now.Sub(t.probeAt) >= 30*time.Second {
+				t.conn.Close()
+			}
+			return
+		}
+	}
+	if now.Sub(tx) < t.heartbeat.interval {
+		return
+	}
+	// Mark before sending so a fast Pong cannot be lost.
+	t.probeAt = now
+	if err := t.conn.WriteControl(websocket.PingMessage, []byte("l5:probe"), time.Now().Add(websocketWriteDealine*time.Second)); err != nil {
+		t.conn.Close()
+		return
+	}
+	t.diagnostic.event("ping-tx")
+	t.diagnostic.event("tx")
+	t.lastTx.Store(time.Now().UnixNano())
+}
+
+func (t *Tunnel) writePong(msg []byte) error {
+	err := t.conn.WriteControl(websocket.PongMessage, msg, time.Now().Add(websocketWriteDealine*time.Second))
+	if err == nil {
+		t.diagnostic.event("pong-tx")
+		t.diagnostic.event("tx")
+		t.lastTx.Store(time.Now().UnixNano())
+	}
+	return err
 }
 
 func (t *Tunnel) write(msg []byte) error {
 	t.writeLock.Lock()
 	t.conn.SetWriteDeadline(time.Now().Add(websocketWriteDealine * time.Second))
 	err := t.conn.WriteMessage(websocket.BinaryMessage, msg)
+	if err == nil {
+		t.diagnostic.event("tx")
+		t.lastTx.Store(time.Now().UnixNano())
+	}
 	t.writeLock.Unlock()
 
 	return err
 }
 
 func (t *Tunnel) onPong(_ []byte) {
-	t.waitping = 0
+	t.waitping.Store(0)
 }
 
 func (t *Tunnel) onClose() {
+	t.diagnostic.finish()
 	if t.rateLimit > 0 && t.rateChan != nil {
 		t.rateChanLock.Lock()
 		t.rateLimit = 0
@@ -244,7 +356,7 @@ func (t *Tunnel) onTunnelMessage(message []byte) error {
 		return fmt.Errorf("invalid tunnel message")
 	}
 
-	t.waitping = 0
+	t.waitping.Store(0)
 
 	cmd := message[0]
 	if cmd == cMDDNSReq {
