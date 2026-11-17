@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"time"
 
@@ -31,32 +32,51 @@ func doDNSQuery(tun *Tunnel, dnsPacket []byte) {
 	if len(dnsPacket) < skipLength {
 		return
 	}
-	conn, err := net.DialUDP("udp", nil, dnsServerAddr)
+	query := dnsPacket[skipLength:]
+	response, err := sharedDNSCache.query(query, dnsServerAddr.String(), func() ([]byte, error) {
+		return exchangeDNS(query, dnsServerAddr)
+	})
 	if err != nil {
-		log.Errorf("doDNSQuery, DialUDP failed:%s", err)
+		log.Warnf("DNS query failed: %s", err)
 		return
 	}
+	reply := make([]byte, skipLength+len(response))
+	copy(reply, dnsPacket[:skipLength])
+	reply[0] = cMDDNSRsp
+	copy(reply[skipLength:], response)
+	if err := tun.write(reply); err != nil {
+		log.Warnf("DNS response tunnel write failed: %s", err)
+	}
+}
 
+var sharedDNSCache = newDNSCache()
+
+func exchangeDNS(query []byte, upstream *net.UDPAddr) ([]byte, error) {
+	if len(query) < 12 {
+		return nil, fmt.Errorf("short DNS query")
+	}
+	conn, err := net.DialUDP("udp", nil, upstream)
+	if err != nil {
+		return nil, err
+	}
 	defer conn.Close()
-	// log.Infof("doDNSQuery, dns query lenght:%d", len(dnsPacket)-skipLength)
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, err = conn.Write(dnsPacket[skipLength:])
-	if err != nil {
-		log.Errorf("doDNSQuery, Write failed:%s", err)
-		return
+	if err = conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return nil, err
 	}
-
-	b := make([]byte, 600) // 600 is enough for DNS query reply
-	n, err := conn.Read(b[skipLength:])
-	if err != nil {
-		log.Errorf("doDNSQuery, Read failed:%s", err)
-		return
+	if _, err = conn.Write(query); err != nil {
+		return nil, err
 	}
-
-	// reply to client
-	copy(b[0:skipLength], dnsPacket[0:skipLength])
-	b[0] = cMDDNSRsp
-	n = n + skipLength
-
-	tun.write(b[0:n])
+	// Larger than any UDP payload; the L5 return envelope is allocated separately.
+	buf := make([]byte, 65535)
+	for {
+		n, e := conn.Read(buf)
+		if e != nil {
+			return nil, e
+		}
+		// Ignore mismatched datagrams within the same bounded deadline.
+		if dnsValidate(query, buf[:n]) != nil {
+			continue
+		}
+		return buf[:n], nil
+	}
 }

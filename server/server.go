@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	wsReadBufSize  = 256 * 1024
-	wsWriteBufSize = 256 * 1024
+	wsReadBufSize  = 4 * 1024 * 1024
+	wsWriteBufSize = 4 * 1024 * 1024
 )
 
 var (

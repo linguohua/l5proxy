@@ -10,6 +10,8 @@ import (
 
 const (
 	tcpSocketWriteDeadline = 5
+	// User-space buffer for reads from the target TCP server.
+	targetTCPReadBufferSize = 256 * 1024
 )
 
 type ProxyContext struct {
@@ -87,7 +89,7 @@ func (r *Request) proxy() {
 
 	now := time.Now()
 	firstByteMark := false
-	buf := make([]byte, 16*1024)
+	buf := make([]byte, targetTCPReadBufferSize)
 	for {
 		n, err := c.Read(buf)
 
@@ -100,6 +102,10 @@ func (r *Request) proxy() {
 		if !firstByteMark {
 			firstByteMark = true
 			ctx.FirstByteTime = time.Since(now)
+		}
+
+		if n > 0 && err == nil {
+			n, err = fillTargetRead(c, buf, n)
 		}
 
 		ctx.Bytes = ctx.Bytes + int64(n)
